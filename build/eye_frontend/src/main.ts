@@ -5,9 +5,9 @@ import { rpc, stats, openEvents, resetToken } from "./api";
 import { store, Fact, EyeEvent, fid } from "./state";
 import { Field, escapeHtml } from "./field";
 import { Stream } from "./stream";
-import { LeftColumn, Inspect } from "./panes";
+import { LeftColumn, Inspect, clearEntityHighlights } from "./panes";
 import { setField, openWorkbench, openBackup, openHelp, openAskAgent,
-         openSettings } from "./modals";
+         openSettings, applyUiPrefs } from "./modals";
 
 const $ = (s: string) => document.querySelector<HTMLElement>(s)!;
 
@@ -70,9 +70,14 @@ function renderStatusBar(): void {
   $("#sb-livelabel").textContent = store.wsStatus;
 }
 
-/* trust lens popover (feedback #4): drag a threshold, view above/below */
+/* trust lens popover (feedback #4): drag a threshold, view above/below.
+   Spark click is a true toggle (r2 #6 — the old outside-click check compared
+   e.target.id to "spark", which the sparkline's child <i> bars broke: the
+   popover dismissed on mousedown, then the click reopened it). The dismiss
+   listener is removed on every close path — no accumulation. */
+let closeTrustLens: (() => void) | null = null;
 function openTrustLens(): void {
-  document.querySelector(".lens-pop")?.remove();
+  if (closeTrustLens) { closeTrustLens(); return; }
   const lens = store.trustLens;
   const el = document.createElement("div");
   el.className = "lens-pop";
@@ -84,25 +89,39 @@ function openTrustLens(): void {
       <span class="v" id="lens-val">${lens.value.toFixed(2)}</span>
     </div>
     <div class="lens-row lens-modes">
-      <button class="btn ${lens.mode === "above" ? "commit" : ""}" data-m="above">🔍 show ≥</button>
-      <button class="btn ${lens.mode === "below" ? "commit" : ""}" data-m="below">🔍 show &lt;</button>
-      <button class="btn ${lens.mode === "off" ? "commit" : ""}" data-m="off">off</button>
+      <button class="btn" data-m="above">🔍 show ≥</button>
+      <button class="btn" data-m="below">🔍 show &lt;</button>
+      <button class="btn" data-m="off">off</button>
     </div>
     <div class="lens-hint">facts failing the filter fade in the field · gold line in Inspect = min_trust ${store.stats.min_trust ?? 0.3}</div>`;
   document.body.appendChild(el);
+  const dismiss = (e: MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (!el.contains(t) && !t.closest("#spark")) closeTrustLens?.();
+  };
+  closeTrustLens = () => {
+    el.remove();
+    removeEventListener("mousedown", dismiss);
+    closeTrustLens = null;
+  };
+  addEventListener("mousedown", dismiss);
+
   const slider = el.querySelector<HTMLInputElement>("#lens-slider")!;
   const val = el.querySelector<HTMLElement>("#lens-val")!;
+  const syncModes = () => {
+    el.querySelectorAll<HTMLElement>("[data-m]").forEach((b) =>
+      b.classList.toggle("commit", b.dataset.m === store.trustLens.mode));
+  };
   const apply = (v: number, mode = store.trustLens.mode) => {
     store.trustLens = { mode, value: Math.max(0, Math.min(1, v)) };
     slider.value = String(store.trustLens.value);
     val.textContent = store.trustLens.value.toFixed(2);
-    if (mode === "off" && store.trustLens.mode !== "off") return;
-    renderStatusBar();
+    syncModes();
+    store.emit("trustlens"); // status bar + field both listen
   };
-  slider.oninput = () => {
-    if (store.trustLens.mode === "off") store.trustLens.mode = "above";
-    apply(Number(slider.value));
-  };
+  slider.oninput = () =>
+    apply(Number(slider.value),
+          store.trustLens.mode === "off" ? "above" : store.trustLens.mode);
   el.querySelector<HTMLElement>("#lens-minus")!.onclick = () =>
     apply(store.trustLens.value - 0.05,
           store.trustLens.mode === "off" ? "above" : store.trustLens.mode);
@@ -110,14 +129,9 @@ function openTrustLens(): void {
     apply(store.trustLens.value + 0.05,
           store.trustLens.mode === "off" ? "above" : store.trustLens.mode);
   el.querySelectorAll<HTMLElement>("[data-m]").forEach((b) => {
-    b.onclick = () => { apply(store.trustLens.value, b.dataset.m as any); openTrustLens(); };
+    b.onclick = () => apply(store.trustLens.value, b.dataset.m as any);
   });
-  const dismiss = (e: MouseEvent) => {
-    if (!el.contains(e.target as Node) && (e.target as HTMLElement).id !== "spark") {
-      el.remove(); removeEventListener("mousedown", dismiss);
-    }
-  };
-  addEventListener("mousedown", dismiss);
+  syncModes();
 }
 
 function onJournalEvent(ev: EyeEvent): void {
@@ -192,14 +206,13 @@ function bindKeys(): void {
     }
     if (e.key === "Escape" && !document.querySelector(".modal-back")) {
       store.clearSelection();
-      store.highlightEntity = null;
-      store.entityHighlight.clear();
-      store.emit("entities");
+      clearEntityHighlights();
     }
   });
 }
 
 async function boot(): Promise<void> {
+  applyUiPrefs(); // persisted text size + garden toggle, before first paint
   field = new Field($("#field-wrap"));
   setField(field);
   new Stream($("#stream"));

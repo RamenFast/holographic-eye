@@ -19,7 +19,11 @@ function modal(title: string, body: string, width = 720): HTMLElement {
   document.body.appendChild(back);
   const close = () => {
     back.remove();
-    if (store.reasonHalo) { store.reasonHalo = null; fieldRef?.logMath([]); }
+    if (store.reasonHalo) {
+      store.reasonHalo = null;
+      store.emit("halo");
+      fieldRef?.logMath([]);
+    }
   };
   back.querySelector<HTMLElement>(".m-close")!.onclick = close;
   back.onclick = (e) => { if (e.target === back) close(); };
@@ -58,6 +62,7 @@ what the agent WOULD have been handed for these entities.</pre>
     store.reasonHalo = store.reasonHalo
       ? { ...store.reasonHalo, factIds: new Set(visible.map((r) => r.fact_id)) }
       : null;
+    store.emit("halo");
     q("#wb-results").innerHTML = visible.length
       ? visible.map((r, i) => `
         <div class="wb-row" data-fid="${r.fact_id}">
@@ -88,6 +93,7 @@ what the agent WOULD have been handed for these entities.</pre>
       results = res.results;
       q("#wb-math").textContent = res.math.join("\n");
       store.reasonHalo = { entities, factIds: new Set() };
+      store.emit("halo");
       fieldRef?.logMath(res.math);
       render();
     } catch (err: any) {
@@ -365,7 +371,8 @@ export function openAskAgent(sel: number[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Legend + glossary (shared by Help and Settings — feedback #8/#11)
+// Legend + glossary — the ? manual is the ONE canonical copy (r2 #5/#12);
+// Settings links here instead of duplicating it
 // ---------------------------------------------------------------------------
 
 function legendHtml(): string {
@@ -411,30 +418,69 @@ function glossaryHtml(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Settings (feedback #3)
+// Settings — true settings ONLY, each explained in one plain sentence
+// (r2 #5/#12). The legend + glossary live in the ? manual, linked below.
 // ---------------------------------------------------------------------------
+
+/** Apply persisted UI preferences (text size, garden). Called at boot and
+    whenever a setting changes. */
+export function applyUiPrefs(): void {
+  const scale = Number(localStorage.getItem("eyeUiScale") || "1") || 1;
+  document.documentElement.style.fontSize = `${(13 * scale).toFixed(2)}px`;
+  document.body.classList.toggle("no-garden",
+    localStorage.getItem("eyeGarden") === "off");
+}
 
 export function openSettings(): void {
   const s = store.stats;
+  const scale = localStorage.getItem("eyeUiScale") || "1";
+  const garden = localStorage.getItem("eyeGarden") !== "off";
   const back = modal("⚙ SETTINGS", `
-    ${legendHtml()}
+    <div class="q-body dim">switches and controls only — the field legend, keys, and
+      terminology live in the <a id="st-manual">? manual</a> (one canonical copy).</div>
+
+    <div class="ep-label">appearance</div>
+    <div class="st-row"><span class="st-k">text size</span>
+      <select id="st-scale">
+        <option value="0.85"${scale === "0.85" ? " selected" : ""}>small · 85%</option>
+        <option value="1"${scale === "1" ? " selected" : ""}>default · 100%</option>
+        <option value="1.1"${scale === "1.1" ? " selected" : ""}>large · 110%</option>
+        <option value="1.25"${scale === "1.25" ? " selected" : ""}>x-large · 125%</option>
+      </select>
+      <span class="st-why">scales every label and number in the app — remembered on this machine.</span></div>
+    <div class="st-row"><span class="st-k">pixel garden</span>
+      <label class="st-check"><input type="checkbox" id="st-garden"${garden ? " checked" : ""}>
+        flowers + cottage along the window edges</label>
+      <span class="st-why">purely decorative — switch it off for a bare instrument panel.</span></div>
+
     <div class="ep-label">projection</div>
-    <div class="q-body">PCA basis fitted over ${s.facts ?? "?"} facts
-      (explained variance ${((store.projectionMeta?.explained_variance ?? [0, 0])
-        .map((v: number) => (v * 100).toFixed(1)).join("% + "))}%).
-      New facts are placed in the existing basis so the map stays stable.
-      <button class="btn" id="st-refit">refit now</button></div>
-    <div class="ep-label">session</div>
-    <div class="q-body">eye attached to gateway session: <span class="v">${escapeHtml(s.session_id ?? "?")}</span>
-      · mode <span class="v">${escapeHtml(s.mode ?? "journal")}</span></div>
-    <div class="ep-label">performance</div>
-    <div class="q-body dim">the wrapper adds ≈0.1–0.2 ms per memory op (journal write) and
-      0 ms to prefetch (journaling runs off the critical path). Reads from this GUI never
-      touch the agent.</div>
-    <div class="ep-label">security</div>
-    <div class="q-body">control plane is loopback-only, bearer-token authed
-      (~/.hermes/eye_token). <button class="btn" id="st-token">forget stored token</button></div>
-    ${glossaryHtml()}`, 700);
+    <div class="st-row"><span class="st-k">refit</span>
+      <button class="btn" id="st-refit">refit now</button>
+      <span class="st-why">re-derives the map's two axes (PCA) from the current ${s.facts ?? "?"} facts.
+        Day to day, new facts are placed in the existing basis so the map never jumps under you —
+        refit when the layout stops matching the data. The current fit explains
+        ${((store.projectionMeta?.explained_variance ?? [0, 0])
+          .map((v: number) => (v * 100).toFixed(1)).join("% + "))}% of the variance.</span></div>
+
+    <div class="ep-label">connection</div>
+    <div class="st-row"><span class="st-k">session</span>
+      <span class="st-why">the Eye is attached to gateway session <span class="v">${escapeHtml(s.session_id ?? "?")}</span>
+        in <span class="v">${escapeHtml(s.mode ?? "journal")}</span> mode. Reads from this GUI never touch
+        the agent; the wrapper adds ≈0.1–0.2&nbsp;ms per memory op and 0&nbsp;ms to prefetch.</span></div>
+    <div class="st-row"><span class="st-k">token</span>
+      <button class="btn" id="st-token">forget stored token</button>
+      <span class="st-why">the control plane is loopback-only and bearer-token authed
+        (~/.hermes/eye_token) — forget the stored copy if you pasted it on a shared browser.</span></div>`, 640);
+  back.querySelector<HTMLElement>("#st-manual")!.onclick = () => openHelp();
+  back.querySelector<HTMLSelectElement>("#st-scale")!.onchange = (e) => {
+    localStorage.setItem("eyeUiScale", (e.target as HTMLSelectElement).value);
+    applyUiPrefs();
+  };
+  back.querySelector<HTMLInputElement>("#st-garden")!.onchange = (e) => {
+    localStorage.setItem("eyeGarden",
+      (e.target as HTMLInputElement).checked ? "on" : "off");
+    applyUiPrefs();
+  };
   back.querySelector<HTMLElement>("#st-refit")!.onclick = async () => {
     await (window as any).eyeRefit();
     openSettings();

@@ -51,8 +51,10 @@ class Store {
 
   selection = new Set<number>();     // selected fact_ids
   focusedFact: number | null = null; // the fact in the Inspect pane
-  entityHighlight = new Set<number>();  // fact_ids highlighted via entity probe
-  highlightEntity: string | null = null;
+  // entity highlight is a real set (r2 #3): every clicked entity stacks;
+  // entityHighlight is the union of all per-entity hits, esc clears all
+  entityHighlight = new Set<number>();
+  highlightedEntities = new Map<string, Set<number>>(); // entity name → fact hits
   // trust lens: view facts above/below a draggable threshold (feedback #4)
   trustLens: { mode: "off" | "above" | "below"; value: number } =
     { mode: "off", value: 0.5 };

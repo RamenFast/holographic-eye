@@ -20,10 +20,16 @@ journal is capturing every op; the GUI is served at `http://127.0.0.1:8770`
 command are registered; first Backup Memory (D-0007) landed on Mass storage.
 See README.md for daily use + recompile/rollback.
 
-**→ Next session: start from `HANDOFF.md` + `feedback/2026-07-02-round2.md`**
-(feedback round 2 is logged with root causes and three prioritized polish
-areas: P-1 render discipline/idle CPU, P-2 affordance truthfulness, P-3 one
-manual + honest settings — D-0009 below).
+**Feedback round 2 APPLIED 2026-07-03** — all three polish priorities (P-1
+render discipline/idle CPU, P-2 affordance truthfulness, P-3 one manual +
+honest settings) plus the delight backlog (flower variety, cottage, text-size
+setting) are live and verified: idle canvas draws 0/5s (was ~300),
+Playwright-driven acceptance on every changed affordance — D-0010 below.
+
+**→ Next session: start from `HANDOFF.md`** (top candidate: the inner
+provider's `probe()` re-encodes every fact's content vector per call —
+measured ~4s per entity click on 518 facts; a content-vector cache upstream
+would make it ~ms. See D-0010 item 8.)
 
 **Open threads for a future session:**
 - Overnight/week soak observation (journal is accumulating; nothing to do
@@ -48,7 +54,7 @@ visual language.
 - PART 4 — Architecture contract 🧠
 - PART 5 — Roadmap 🧠
 - PART 6 — UI spec 🧠 (adopted wireframe, ~600 lines, canonical layout/interaction)
-- PART 7 — Decision log (D-0001 … D-0006)
+- PART 7 — Decision log (D-0001 … D-0010; D-0007+ live just above PART 7)
 
 Ben's original drafts (pre-integration) are archived at
 `~/Documents/📥 Inbox/HolographicEye-drafts/`.
@@ -1334,6 +1340,63 @@ Ben's first hands-on pass produced 13 items; all applied same session:
   bottom-right, font-size setting.
 - Same session: project pushed to GitHub (private — the Field and mockup
   screenshots contain Ben's real memory contents).
+- **Applied next session (2026-07-03) — see D-0010.**
+
+## D-0010 — Feedback round 2 applied: render discipline, affordance truth, one manual (2026-07-03)
+
+- Status: **applied + verified live** (frontend-only; no server code changed,
+  no gateway restart needed; both acceptance harnesses re-run ALL-PASS).
+- Verification: Playwright (system Chrome, headless) against the deployed GUI
+  with a `clearRect` hook counting real canvas draws.
+
+1. **Dirty-flag rendering (P-1, r2 #7)** — the unconditional 60fps rAF loop is
+   gone. `Field.requestDraw()` coalesces one frame per change (camera, hover,
+   data, selection, highlight, lens, halo) and keeps itself alive only while
+   effects animate or a halo breathes. New store topics: `trustlens`, `halo`;
+   a `ResizeObserver` covers window/pane resizes; the 200ms tooltip delay is a
+   timer, not a poll. **Measured: 0 draws in 5s idle** (was ~300); pan = 8
+   draws then back to 0; resize = exactly 1 draw.
+2. **Banding gradient removed (r2 #1)** — the radial "depth" gradient banded
+   into concentric rings on near-black displays; the Field keeps only the
+   hairline grid.
+3. **One bottom info lane (r2 #2)** — the mathlog now sits above the
+   no-vector strip (`bottom: 30px`) on its own background, hides itself when
+   empty (`:empty`); the strip owns the bottom edge. They can no longer
+   overlap at any size.
+4. **Scrollbar gutter (r2 #8)** — `scrollbar-gutter: stable` on `.pane`; tab
+   switches no longer shift content.
+5. **Multi-entity highlight is a real set (P-2, r2 #3)** —
+   `store.highlightedEntities: Map<name, Set<fact_id>>`; every click toggles
+   membership; the field rings the union; all active rows show active state;
+   esc clears all. Probe results land per-entity (stale results for a
+   since-dropped entity are discarded).
+6. **Chevron discloses (r2 #4)** — ▸ unfolds that entity's facts inline
+   (click one → selects it in the Field); rotation now means "open", not
+   hover decoration. No dead affordances.
+7. **Trust lens toggles predictably (r2 #6)** — spark click is a true toggle;
+   the outside-click dismiss uses `closest("#spark")` (the old `id` check
+   broke on the sparkline's child `<i>` bars → close-then-reopen); the
+   mousedown listener is removed on every close path (was leaking one per
+   open); mode buttons update in place. Lens changes emit `trustlens`.
+8. **Honest probe feedback** — found while verifying: the inner provider's
+   `probe()` takes ~4s (it re-encodes `encode_text(content)` for all 518
+   facts per call — upstream `plugins/memory/holographic/retrieval.py`, a
+   clean cache candidate, out of scope here). The mathlog now narrates
+   immediately ("running… · N linked ringed") and updates when the probe
+   returns — the UI never sits silent.
+9. **One manual, honest settings (P-3, r2 #5/#12)** — ? is the manual
+   (keys + legend + glossary, single canonical copy); ⚙ holds only real
+   settings, each with a one-sentence plain-language explanation, and links
+   to the manual.
+10. **Text size setting (r2 #11)** — all font sizes converted to rem
+    (13px = 1rem root); ⚙ appearance → 85%/100%/110%/125%, applied via root
+    `font-size`, persisted in `localStorage.eyeUiScale`.
+11. **Pixel garden variety + toggle + cottage (r2 #9/#10)** — flowerbed tile
+    widened to six species (pink five-petal, bud, rose, gold daisy, bluebell,
+    white daisy) + grass tufts; a pixel cottage with a lit gold window sits
+    bottom-right (flowers grow in front of its doorstep); ⚙ appearance →
+    "pixel garden" checkbox (`body.no-garden`), persisted in
+    `localStorage.eyeGarden`.
 
 ---
 

@@ -46,6 +46,9 @@ session. License: [GPLv3](LICENSE).
   (every op live: tool calls, prefetch injections, mirrors, auto-extracts).
 - **Modals**: Reason Workbench (`⌘R` — previews *the recall, not the answer*),
   FFT inspector (`inspect algebra`), Backup Memory, Ask-the-agent.
+- **? is the manual** (keys + legend + glossary — the one canonical copy);
+  **⚙ holds real settings only**: text size (85–125%), pixel-garden toggle,
+  projection refit, token reset — each explained in plain language.
 - **CLI**: `hermes holographic-eye status | tail | undo-last | backup | gui`
 - **In chat**: `/holo [n]` — status + last n journal events.
 

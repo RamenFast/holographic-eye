@@ -28,6 +28,7 @@ export class LeftColumn {
   private tab: "entities" | "queue" | "contra" = "entities";
   private entityFilter = "";
   private expanded = false;
+  private disclosed = new Set<string>(); // entities with facts unfolded (r2 #4)
   private contraData: any[] | null = null;
   private lastReviewed = Number(localStorage.getItem("eyeLastReviewed") || 0);
 
@@ -100,10 +101,22 @@ export class LeftColumn {
         : probed
           ? '<span class="mono-state st-probed" title="probed in the last 60s">⊙</span>'
           : '<span class="mono-state st-idle">○</span>';
-      const active = store.highlightEntity === e.name ? " active" : "";
+      const active = store.highlightedEntities.has(e.name) ? " active" : "";
+      const open = this.disclosed.has(e.name);
+      // chevron discloses this entity's facts inline (r2 #4 — no dead affordances)
+      let sub = "";
+      if (open) {
+        const facts = [...store.facts.values()].filter((f) =>
+          f.entities.some((n) => n.toLowerCase() === e.name.toLowerCase()));
+        sub = `<div class="ent-facts">` + (facts.length
+          ? facts.map((f) =>
+              `<div class="ent-fact" data-fid="${f.fact_id}"><b>${fid(f.fact_id)}</b> ${escapeHtml(f.content.slice(0, 52))}${f.content.length > 52 ? "…" : ""}</div>`).join("")
+          : `<div class="ent-fact none">no facts link here in the current projection</div>`)
+          + `</div>`;
+      }
       return `<div class="ent-row${active}" data-name="${escapeHtml(e.name)}" data-id="${e.entity_id}">
-        <span class="chev">▸</span><span class="nm">${escapeHtml(e.name)}</span>
-        <span class="n">${e.fact_count}</span>${glyph}</div>`;
+        <span class="chev${open ? " open" : ""}" title="${open ? "collapse" : "show this entity's facts"}">▸</span><span class="nm">${escapeHtml(e.name)}</span>
+        <span class="n">${e.fact_count}</span>${glyph}</div>${sub}`;
     }).join("");
     return `
       <div class="pane-sub"><input id="entfilter" placeholder="filter ${store.entityTotal} entities…"
@@ -111,7 +124,8 @@ export class LeftColumn {
       <div class="ent-list">${items}</div>
       ${rows.length > 40 && !this.expanded
         ? `<div class="more" id="entmore">+ ${rows.length - 40} more</div>` : ""}
-      <div class="pane-hint">click: highlight via probe · ⌘click: reason · right-click: desk</div>`;
+      <div class="pane-hint">click: highlight via probe (stacks — click again to drop) ·
+        ▸: unfold facts · ⌘click: reason · right-click: desk</div>`;
   }
 
   private renderQueue(): string {
@@ -179,9 +193,21 @@ export class LeftColumn {
           highlightEntity(name);
         }
       };
+      row.querySelector<HTMLElement>(".chev")!.onclick = (e) => {
+        e.stopPropagation();
+        if (this.disclosed.has(name)) this.disclosed.delete(name);
+        else this.disclosed.add(name);
+        this.render();
+      };
       row.oncontextmenu = (e) => {
         e.preventDefault();
         entityMenu(e as MouseEvent, Number(row.dataset.id!), name);
+      };
+    });
+    this.el.querySelectorAll<HTMLElement>(".ent-fact[data-fid]").forEach((fr) => {
+      fr.onclick = (e) => {
+        e.stopPropagation();
+        store.select([Number(fr.dataset.fid)]);
       };
     });
     this.el.querySelectorAll<HTMLElement>(".q-undo").forEach((btn) => {
@@ -234,16 +260,35 @@ function queueSummary(ev: EyeEvent, req: any, resp: any): string {
   }
 }
 
+function rebuildHighlightUnion(): void {
+  store.entityHighlight = new Set<number>();
+  for (const hits of store.highlightedEntities.values()) {
+    for (const id of hits) store.entityHighlight.add(id);
+  }
+}
+
+function logHighlightState(field: any, probeLines: string[] = []): void {
+  const names = [...store.highlightedEntities.keys()];
+  if (!names.length) { field?.logMath([]); return; }
+  const summary = names.length > 1
+    ? [`highlighting ${names.length} entities: ${names.join(" + ")} ` +
+       `→ union ${store.entityHighlight.size} fact(s) · click an entity again to drop it · esc clears all`]
+    : [`dimmed dots don't involve this entity · click again or esc to clear`];
+  field?.logMath([...probeLines, ...summary]);
+}
+
+/** Toggle an entity's highlight. Highlights stack (r2 #3): each clicked
+    entity probes independently and the field rings the union. */
 export async function highlightEntity(name: string | null): Promise<void> {
   const field = (window as any).eyeField;
-  if (!name || store.highlightEntity === name) {
-    store.highlightEntity = null;
-    store.entityHighlight.clear();
-    field?.logMath([]);
+  if (!name) return clearEntityHighlights();
+  if (store.highlightedEntities.has(name)) {
+    store.highlightedEntities.delete(name);
+    rebuildHighlightUnion();
+    logHighlightState(field);
     store.emit("entities");
     return;
   }
-  store.highlightEntity = name;
   store.probedRecently.set(name.toLowerCase(), Date.now());
   // 1) facts linked to the entity in the DB — always present, instant
   const linked = new Set<number>();
@@ -252,26 +297,44 @@ export async function highlightEntity(name: string | null): Promise<void> {
       linked.add(f.fact_id);
     }
   }
-  store.entityHighlight = new Set(linked);
+  store.highlightedEntities.set(name, linked);
+  rebuildHighlightUnion();
+  // say what's happening NOW — the probe below can take seconds and the
+  // ringed dots alone don't explain themselves
+  logHighlightState(field, [
+    `probe("${name.toLowerCase()}") = unbind(fact, bind(atom, ROLE_ENTITY)) — running…`,
+    `→ ${linked.size} linked fact(s) ringed · structural hits land when the probe returns`,
+  ]);
   store.emit("entities");
   // 2) structural presence via the provider's own probe (same code the
   //    agent runs). probe score = (sim+1)/2 · trust → recover sim; a fact
   //    is structurally hot above sim 0.35 (wireframe cut).
+  const hits = new Set(linked);
   let structural = 0;
   try {
     const res = await toolRead("probe", { entity: name, limit: 80 });
     for (const r of res.results || []) {
       if (r.trust_score > 0 && (2 * r.score / r.trust_score - 1) > 0.35) {
-        store.entityHighlight.add(r.fact_id);
+        hits.add(r.fact_id);
         structural++;
       }
     }
   } catch { /* probe unavailable — linked set stands */ }
-  field?.logMath([
+  // the entity may have been toggled off while the probe ran
+  if (!store.highlightedEntities.has(name)) return;
+  store.highlightedEntities.set(name, hits);
+  rebuildHighlightUnion();
+  logHighlightState(field, [
     `probe("${name.toLowerCase()}") = unbind(fact, bind(atom, ROLE_ENTITY))`,
     `→ ${linked.size} linked fact(s) · ${structural} structurally hot (sim > 0.35)`,
-    `dimmed dots don't involve this entity · esc to clear`,
   ]);
+  store.emit("entities");
+}
+
+export function clearEntityHighlights(): void {
+  store.highlightedEntities.clear();
+  store.entityHighlight.clear();
+  (window as any).eyeField?.logMath([]);
   store.emit("entities");
 }
 

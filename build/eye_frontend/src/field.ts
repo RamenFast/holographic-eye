@@ -1,7 +1,12 @@
 /* The Field — 2D canvas of the real HRR geometry (PART 6 §3).
    Positions come from field.projection (server-side PCA in the
    similarity-preserving embedding). Camera is instant; animation
-   budget is spent on data changes only. GPLv3 — see LICENSE. */
+   budget is spent on data changes only.
+
+   Render discipline (D-0009): the canvas is dirty-flag driven — a frame
+   is drawn only when something changed (camera, hover, data, selection,
+   highlight, lens, halo) or while transient effects are animating.
+   Idle cost target: <1% CPU. GPLv3 — see LICENSE. */
 
 import { store, catColor, fid, Fact } from "./state";
 
@@ -38,6 +43,8 @@ export class Field {
   private effects: Effect[] = [];
   private dragRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private bounds = { minX: -1, maxX: 1, minY: -1, maxY: 1 };
+  private rafPending = false;
+  private tooltipTimer: number | undefined;
 
   constructor(container: HTMLElement) {
     this.canvas = container.querySelector("canvas")!;
@@ -45,9 +52,26 @@ export class Field {
     this.tooltip = container.querySelector<HTMLElement>(".tooltip")!;
     this.mathLog = container.querySelector<HTMLElement>(".mathlog")!;
     this.bindInput();
-    store.on("facts", () => this.computeBounds());
-    const loop = () => { this.draw(); requestAnimationFrame(loop); };
-    requestAnimationFrame(loop);
+    store.on("facts", () => { this.computeBounds(); this.requestDraw(); });
+    store.on("selection", () => this.requestDraw());
+    store.on("entities", () => this.requestDraw());   // entity highlight lives here
+    store.on("trustlens", () => this.requestDraw());
+    store.on("halo", () => this.requestDraw());
+    new ResizeObserver(() => this.requestDraw()).observe(this.canvas);
+    this.requestDraw();
+  }
+
+  /** Schedule one frame; keeps itself alive only while animations run. */
+  requestDraw(): void {
+    if (this.rafPending) return;
+    this.rafPending = true;
+    requestAnimationFrame(() => {
+      this.rafPending = false;
+      this.draw();
+      if (this.effects.length || (store.reasonHalo && !reducedMotion)) {
+        this.requestDraw();
+      }
+    });
   }
 
   // -- coordinate transforms -------------------------------------------------
@@ -87,6 +111,7 @@ export class Field {
     this.scale = Math.min((w * 0.86) / spanX, (h * 0.82) / spanY);
     this.cx = (b.minX + b.maxX) / 2;
     this.cy = (b.minY + b.maxY) / 2;
+    this.requestDraw();
   }
 
   resetCamera(): void { this.fit(); }
@@ -103,6 +128,7 @@ export class Field {
       this.effects.push({ kind: "ripple", x: n.x!, y: n.y!,
                           start: now + 80 * i, duration: 600 });
     });
+    this.requestDraw();
   }
 
   bankPulse(category: string): void {
@@ -114,6 +140,7 @@ export class Field {
     if (!n) return;
     this.effects.push({ kind: "bankpulse", x: sx / n, y: sy / n, category,
                         start: performance.now(), duration: 1500 });
+    this.requestDraw();
   }
 
   private nearest(f: Fact, k: number): Fact[] {
@@ -145,6 +172,7 @@ export class Field {
       this.scale = Math.max(base * 0.5, Math.min(base * 8, this.scale * factor));
       const [wx2, wy2] = this.toWorld(e.offsetX, e.offsetY);
       this.cx += wx - wx2; this.cy += wy - wy2;
+      this.requestDraw();
     }, { passive: false });
 
     c.addEventListener("mousedown", (e) => {
@@ -168,11 +196,19 @@ export class Field {
       if (this.dragging) {
         this.cx -= dx / this.scale; this.cy -= dy / this.scale;
         if (Math.abs(dx) + Math.abs(dy) > 1) this.panMoved = true;
+        this.requestDraw();
       } else if (this.dragRect) {
         this.dragRect.x1 = e.offsetX; this.dragRect.y1 = e.offsetY;
+        this.requestDraw();
       } else {
         const hit = this.hitTest(e.offsetX, e.offsetY);
-        if (hit !== this.hoverId) { this.hoverId = hit; this.hoverAt = performance.now(); this.tooltipShown = false; }
+        if (hit !== this.hoverId) {
+          this.hoverId = hit; this.hoverAt = performance.now(); this.tooltipShown = false;
+          // one frame now (ring the dot), one after the 200ms tooltip delay
+          clearTimeout(this.tooltipTimer);
+          if (hit !== null) this.tooltipTimer = window.setTimeout(() => this.requestDraw(), 210);
+          this.requestDraw();
+        }
       }
       this.lastMouse = { x: e.offsetX, y: e.offsetY };
     });
@@ -180,6 +216,7 @@ export class Field {
     c.addEventListener("mouseup", (e) => {
       if (this.dragRect) {
         const r = this.dragRect; this.dragRect = null;
+        this.requestDraw();
         if (Math.abs(r.x1 - r.x0) > 6 && Math.abs(r.y1 - r.y0) > 6) {
           const [ax, ay] = this.toWorld(Math.min(r.x0, r.x1), Math.min(r.y0, r.y1));
           const [bx, by] = this.toWorld(Math.max(r.x0, r.x1), Math.max(r.y0, r.y1));
@@ -204,7 +241,11 @@ export class Field {
       else if (!e.shiftKey) store.clearSelection();
     });
 
-    c.addEventListener("mouseleave", () => { this.hoverId = null; });
+    c.addEventListener("mouseleave", () => {
+      this.hoverId = null;
+      clearTimeout(this.tooltipTimer);
+      this.requestDraw();
+    });
 
     addEventListener("keydown", (e) => {
       if ((e.target as HTMLElement).tagName === "INPUT" ||
@@ -246,10 +287,8 @@ export class Field {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    // depth gradient + hairline grid
-    const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) / 1.4);
-    g.addColorStop(0, "rgba(255,255,255,0.02)"); g.addColorStop(1, "transparent");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    // hairline grid only — the old radial "depth" gradient banded into
+    // visible rings on near-black displays (feedback r2 #1)
     ctx.strokeStyle = "rgba(255,255,255,0.02)"; ctx.lineWidth = 1;
     for (let x = 80; x < w; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
     for (let y = 80; y < h; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
