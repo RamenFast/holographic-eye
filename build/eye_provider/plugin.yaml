@@ -1,0 +1,9 @@
+name: holographic-eye
+version: 0.1.0
+description: >
+  The Holographic Eye — journaling wrapper around the bundled holographic
+  memory provider. Delegates every op unchanged, records each one to
+  eye_journal.db with full before/after images, and hosts the loopback
+  control plane for the Eye GUI. Activate with memory.provider: holographic-eye.
+author: Ben (compiled from PLAN.md by Claude)
+kind: exclusive

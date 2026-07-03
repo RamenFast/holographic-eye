@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The Holographic Eye — P0 mockup</title>
+<!--
+  P0 deliverable: single-file rendered mockup of The Holographic Eye.
+  Layout per PLAN.md PART 6 (UI spec); shell per PART 2 (Blossom).
+  All numbers on screen are real — pulled from ~/.hermes/memory_store.db
+  on 2026-07-02 (516 facts, 620 entities, SNR 1.41, trust spike at 0.5).
+  Compiled from PLAN.md — do not hand-edit without folding back.
+-->
+<style>
+  :root {
+    /* Blossom shell (PART 2 token remap) */
+    --ink-base:      #000000;
+    --ink-raised:    #0a0a0a;
+    --ink-surface:   #141414;
+    --ink-hairline:  #3b3b3b;
+    --ink-text:      #eaf6ff;
+    --ink-text-dim:  #9fb3c2;
+
+    --acting:        #db3776;                 /* pink — what you're acting on */
+    --acting-dim:    rgba(219, 55, 118, 0.30);
+    --reference:     #f1bf40;                 /* gold — the reference you act against */
+    --numerics:      #f1bf40;
+    --signal-add:    #52a462;
+    --signal-remove: #ec4e53;
+    --signal-warn:   #f1bf40;
+
+    /* category hues — low chroma, 7 live categories (P7 tune) */
+    --cat-user_pref: hsl(338, 45%, 62%);
+    --cat-project:   #5e8aa8;
+    --cat-tool:      hsl(0, 0%, 72%);
+    --cat-general:   hsl(0, 0%, 50%);
+    --cat-lesson:    hsl(140, 15%, 55%);
+    --cat-seed:      hsl(30, 25%, 58%);
+    --cat-session:   hsl(270, 15%, 58%);
+
+    --font-sans: "Inter", "Cantarell", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #0d0d10; }
+  body {
+    font-family: var(--font-sans); color: var(--ink-text);
+    display: flex; align-items: center; justify-content: center;
+    min-width: 1100px; min-height: 680px;
+  }
+
+  /* window: glass only at the outer 8px */
+  .window {
+    width: min(1440px, calc(100vw - 32px));
+    height: min(900px, calc(100vh - 32px));
+    padding: 8px; border-radius: 10px;
+    background: linear-gradient(160deg, rgba(219,55,118,0.10), rgba(255,255,255,0.05) 30%, rgba(241,191,64,0.06) 90%);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+    display: flex;
+  }
+  .app {
+    flex: 1; display: grid;
+    grid-template-rows: 32px 1fr 84px;
+    background: var(--ink-base);
+    border-radius: 4px; overflow: hidden;
+    border: 1px solid var(--ink-hairline);
+  }
+
+  /* ── status bar ─────────────────────────────────────────── */
+  .statusbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 12px; font-size: 11px; color: var(--ink-text-dim);
+    border-bottom: 1px solid var(--ink-hairline); background: var(--ink-raised);
+  }
+  .glyph-eye { color: var(--acting); font-size: 13px; animation: pulse 1s ease-in-out infinite alternate; }
+  @keyframes pulse { from { opacity: 0.6; } to { opacity: 0.3; } }
+  .appname { font-size: 12px; color: var(--ink-text); }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--signal-add); display: inline-block; }
+  .metrics { font-family: var(--font-mono); margin-left: 8px; }
+  .metrics b { color: var(--numerics); font-weight: 500; }
+  .warn { color: var(--signal-warn); }
+  .spark { display: inline-flex; align-items: flex-end; gap: 1px; height: 12px; margin: 0 4px; vertical-align: -2px; }
+  .spark i { width: 4px; background: var(--ink-hairline); display: block; }
+  .spark i.hot { background: var(--reference); }
+  .sb-right { margin-left: auto; font-size: 11px; letter-spacing: 0.02em; }
+  .sb-right span { margin-left: 14px; }
+  .sb-right span:hover { color: var(--ink-text); }
+
+  /* ── main grid ──────────────────────────────────────────── */
+  .main { display: grid; grid-template-columns: 240px 1fr 320px; min-height: 0; }
+  .pane { border-right: 1px solid var(--ink-hairline); overflow-y: auto; }
+  .pane:last-child { border-right: none; }
+  .pane-label {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--acting); padding: 10px 12px 2px;
+  }
+  .pane-sub { font-size: 11px; color: var(--ink-text-dim); padding: 0 12px 8px; }
+
+  /* left column tabs (delta 2: Entities · Queue · Contradict share the column) */
+  .tabs { display: flex; border-bottom: 1px solid var(--ink-hairline); }
+  .tab {
+    flex: 1; text-align: center; padding: 7px 0 6px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em;
+    color: var(--ink-text-dim); cursor: default; border-bottom: 1px solid transparent;
+  }
+  .tab.active { color: var(--acting); border-bottom-color: var(--acting); }
+  .tab .badge { color: var(--reference); }
+
+  .ent-row {
+    display: flex; align-items: center; height: 32px; padding: 0 12px; gap: 8px;
+    font-size: 13px; cursor: default;
+  }
+  .ent-row:hover { background: rgba(255,255,255,0.04); }
+  .ent-row .chev { color: var(--acting-dim); font-size: 10px; }
+  .ent-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ent-row .nm.junk { color: var(--ink-text-dim); font-style: italic; }
+  .ent-row .n { font-family: var(--font-mono); font-size: 10px; color: var(--ink-text-dim); }
+  .mono-state { font-size: 12px; }
+  .st-probed { color: var(--acting); }
+  .st-idle   { color: var(--ink-text-dim); opacity: 0.7; }
+  .st-empty  { color: var(--signal-warn); }
+  .more { font-size: 11px; color: var(--ink-text-dim); padding: 10px 12px; border-top: 1px solid var(--ink-hairline); margin-top: 6px; }
+
+  /* ── the Field ──────────────────────────────────────────── */
+  .field-wrap { position: relative; overflow: hidden; background: var(--ink-base); }
+  canvas#field { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .field-title {
+    position: absolute; top: 10px; left: 0; right: 0; text-align: center;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.5em;
+    color: var(--ink-text-dim); opacity: 0.55; pointer-events: none;
+  }
+  .tooltip {
+    position: absolute; width: 250px; padding: 8px 10px;
+    background: var(--ink-raised); border: 1px solid var(--acting);
+    font-size: 11px; line-height: 1.45; color: var(--ink-text); border-radius: 2px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.7);
+  }
+  .tooltip .hd { font-family: var(--font-mono); color: var(--numerics); margin-bottom: 3px; }
+  .tooltip .hd .cat { color: var(--cat-project); }
+  .tooltip .ents { color: var(--ink-text-dim); margin-top: 4px; }
+  .tooltip .ents em { color: var(--acting); font-style: normal; }
+  .tooltip .close { color: var(--ink-text-dim); }
+  .tooltip .close b { font-family: var(--font-mono); color: var(--numerics); font-weight: 500; }
+
+  /* ── inspect ────────────────────────────────────────────── */
+  .factid { font-family: var(--font-mono); font-size: 13px; color: var(--numerics); padding: 2px 12px 6px; }
+  .inspect-body { padding: 0 12px 12px; }
+  .chips { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .chip-cat {
+    font-family: var(--font-mono); font-size: 10px; padding: 2px 6px;
+    border: 1px solid var(--reference); color: var(--cat-project); border-radius: 2px;
+  }
+  .tags { font-size: 11px; color: var(--ink-text-dim); }
+  .content { font-size: 14px; line-height: 1.5; margin: 10px 0; }
+  .editlinks { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .editlinks a { font-size: 11px; color: var(--acting); text-decoration: none; }
+  .editlinks a:hover { text-decoration: underline; }
+  .kv { display: grid; grid-template-columns: 88px 1fr; gap: 4px 8px; font-size: 11px; align-items: center; margin-bottom: 12px; }
+  .kv .k { color: var(--ink-text-dim); }
+  .kv .v { font-family: var(--font-mono); color: var(--numerics); }
+  .trustbar { width: 160px; height: 8px; background: rgba(255,255,255,0.06); border-radius: 1px; position: relative; display: inline-block; vertical-align: middle; }
+  .trustbar .fill { position: absolute; inset: 0 auto 0 0; width: 60%; background: var(--cat-project); }
+  .trustbar .minline { position: absolute; top: -2px; bottom: -2px; left: 30%; width: 1px; background: var(--reference); }
+  .ts { font-size: 11px; color: var(--ink-text-dim); margin-bottom: 12px; line-height: 1.6; }
+  .ent-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .ent-chip { font-size: 10px; padding: 2px 6px; border: 1px solid var(--acting-dim); color: var(--ink-text); border-radius: 2px; }
+  .ent-chip:hover { border-color: var(--acting); }
+  .vecline { font-family: var(--font-mono); font-size: 11px; color: var(--ink-text-dim); margin-bottom: 6px; }
+  .linkrow { display: flex; gap: 14px; margin-bottom: 14px; }
+  .linkrow a { font-size: 11px; color: var(--acting); text-decoration: none; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    font-size: 11px; padding: 4px 10px; background: transparent; color: var(--ink-text);
+    border: 1px solid var(--ink-hairline); border-radius: 2px; cursor: default;
+  }
+  .btn.good  { border-color: var(--signal-add); }
+  .btn.bad   { border-color: var(--signal-remove); }
+  .btn.del   { border-color: var(--signal-remove); color: var(--signal-remove); }
+  .btn.undo  { border-color: var(--reference); color: var(--reference); }
+
+  /* ── stream ─────────────────────────────────────────────── */
+  .stream { border-top: 1px solid var(--ink-hairline); background: var(--ink-raised); overflow-y: auto; padding: 4px 0; }
+  .s-line { display: flex; gap: 14px; height: 24px; align-items: center; padding: 0 12px; font-size: 11px; white-space: nowrap; }
+  .s-time { font-family: var(--font-mono); color: var(--ink-text-dim); }
+  .s-act  { font-family: var(--font-mono); font-size: 12px; color: var(--ink-text); width: 190px; }
+  .s-act.src-prefetch { color: var(--reference); }
+  .s-act.src-mirror   { color: var(--ink-text-dim); }
+  .s-det  { flex: 1; color: var(--ink-text-dim); overflow: hidden; text-overflow: ellipsis; }
+  .s-det b { font-family: var(--font-mono); color: var(--numerics); font-weight: 500; }
+  .s-ok  { color: var(--signal-add); }
+  .s-ms  { font-family: var(--font-mono); color: var(--numerics); width: 48px; text-align: right; }
+  .s-line.aged  { opacity: 0.75; }
+  .s-line.aged2 { opacity: 0.5; }
+
+  @media (prefers-reduced-motion: reduce) { .glyph-eye { animation: none; } }
+</style>
+</head>
+<body>
+<div class="window"><div class="app">
+
+  <!-- status bar -->
+  <div class="statusbar">
+    <span class="glyph-eye">⊙</span>
+    <span class="appname">The Holographic Eye</span>
+    <span class="live-dot"></span><span>live</span>
+    <span class="metrics">
+      <b>516</b> facts · <b>620</b> entities ·
+      trust
+      <span class="spark" title="trust histogram 0.0→1.0 (505 facts sit at 0.5)">
+        <i style="height:2px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:2px"></i><i style="height:2px"></i><i class="hot" style="height:12px"></i><i style="height:4px"></i><i style="height:2px"></i><i style="height:2px"></i><i style="height:2px"></i>
+      </span>
+      · SNR <b>1.41</b> <span class="warn">⚠</span> · journal lag <b>0.04s</b>
+    </span>
+    <span class="sb-right"><span>⌘E edit</span><span>⌘R reason</span><span>⌘, settings</span><span>⌘Q quit</span></span>
+  </div>
+
+  <!-- main -->
+  <div class="main">
+
+    <!-- left: entities / queue / contradictions -->
+    <div class="pane">
+      <div class="tabs">
+        <div class="tab active">ENTITIES</div>
+        <div class="tab">QUEUE <span class="badge">3</span></div>
+        <div class="tab">CONTRA</div>
+      </div>
+      <div class="pane-sub" style="padding-top:8px">620 total · by fact count</div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm">Hermes Agent</span><span class="n">5</span><span class="mono-state st-probed">⊙</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm">Pi Agent</span><span class="n">5</span><span class="mono-state st-idle">○</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm">Nexus Agent</span><span class="n">4</span><span class="mono-state st-probed">⊙</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm">Spotify Centogram</span><span class="n">4</span><span class="mono-state st-idle">○</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm junk">where am I on the plan</span><span class="n">3</span><span class="mono-state st-idle">○</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm">Boundary Document</span><span class="n">3</span><span class="mono-state st-idle">○</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm junk">No Chinese</span><span class="n">3</span><span class="mono-state st-idle">○</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm junk">Hey Nexus</span><span class="n">3</span><span class="mono-state st-idle">○</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm">Thorium Browser</span><span class="n">2</span><span class="mono-state st-probed">⊙</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm">Google Sync</span><span class="n">1</span><span class="mono-state st-idle">○</span></div>
+      <div class="ent-row"><span class="chev">▸</span><span class="nm junk">Krkkonos Giant</span><span class="n">0</span><span class="mono-state st-empty">⊗</span></div>
+      <div class="more">+ 609 more</div>
+    </div>
+
+    <!-- center: the Field -->
+    <div class="field-wrap">
+      <div class="field-title">T H E&nbsp;&nbsp;F I E L D</div>
+      <canvas id="field"></canvas>
+      <div class="tooltip" id="tip">
+        <div class="hd">f#0530 · <span class="cat">project</span> · trust 0.60</div>
+        <div>“Thorium Browser (Chromium fork) is installed and verified on Ben’s box: 144.0.7559.254 AVX2 build…”</div>
+        <div class="ents">⊙ entities: <em>thorium browser</em>, google sync</div>
+        <div class="close">→ closest: <b>f#0234</b> (0.71) <b>f#0164</b> (0.63) <b>f#0001</b> (0.58)</div>
+      </div>
+    </div>
+
+    <!-- right: inspect -->
+    <div class="pane">
+      <div class="pane-label">Inspect</div>
+      <div class="factid">f#0530</div>
+      <div class="inspect-body">
+        <div class="chips"><span class="chip-cat">PROJECT</span></div>
+        <div class="tags">thorium, chromium, ad-blocker, mv2, google-sync, browser</div>
+        <div class="content">Thorium Browser (Chromium fork) is installed and verified on Ben’s box: 144.0.7559.254 AVX2 build at /usr/bin/thorium-browser, packaged for Mint with MV2 support intact.</div>
+        <div class="editlinks">
+          <a href="#">edit content</a>
+          <a href="#">edit category ▾</a>
+          <a href="#">edit tags</a>
+        </div>
+        <div class="kv">
+          <span class="k">trust</span>
+          <span><span class="trustbar"><span class="fill"></span><span class="minline" title="min_trust 0.3 — the reference"></span></span> <span class="v">0.60</span></span>
+          <span class="k">retrievals</span><span class="v">2× <span style="color:var(--ink-text-dim);font-family:var(--font-sans)">(journal-observed)</span></span>
+          <span class="k">helpful</span><span class="v">0×</span>
+        </div>
+        <div class="ts">created&nbsp;&nbsp;2026-07-01 19:53:40<br>updated&nbsp;&nbsp;2026-07-01 20:42:48</div>
+        <div class="ent-chips"><span class="ent-chip">⊙ thorium browser</span><span class="ent-chip">○ google sync</span></div>
+        <div class="vecline">hrr_vector&nbsp;&nbsp;8192 B (1024 × f64)</div>
+        <div class="linkrow"><a href="#">inspect algebra</a><a href="#">export fact</a></div>
+        <div class="actions">
+          <button class="btn good">👍 helpful</button>
+          <button class="btn bad">👎 unhelpful</button>
+          <button class="btn undo">↶ undo</button>
+          <button class="btn del">delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- stream footer -->
+  <div class="stream">
+    <div class="s-line">
+      <span class="s-time">17:41:02</span><span class="s-act src-prefetch">prefetch</span>
+      <span class="s-det">“thorium mv2 profile” → injected 5 facts, 412 chars &nbsp;<b>f#0530 f#0234 f#0164 f#0087 f#0311</b></span>
+      <span class="s-ok">✓</span><span class="s-ms">9ms</span>
+    </div>
+    <div class="s-line">
+      <span class="s-time">17:40:58</span><span class="s-act">fact_store(add)</span>
+      <span class="s-det">“Thorium Browser (Chromium fork) is installed and veri…” → <b>f#0530</b> · entity+2 · bank cat:project (53)</span>
+      <span class="s-ok">✓</span><span class="s-ms">38ms</span>
+    </div>
+    <div class="s-line aged">
+      <span class="s-time">17:40:31</span><span class="s-act src-mirror">mirror</span>
+      <span class="s-det">memory add → fact mirrored as cat:general · <b>f#0529</b></span>
+      <span class="s-ok">✓</span><span class="s-ms">4ms</span>
+    </div>
+    <div class="s-line aged2">
+      <span class="s-time">17:39:12</span><span class="s-act">fact_store(probe)</span>
+      <span class="s-det">“hermes agent” → top 3: <b>f#0234</b> (0.91) <b>f#0501</b> (0.74) <b>f#0016</b> (0.66)</span>
+      <span class="s-ok">✓</span><span class="s-ms">6ms</span>
+    </div>
+  </div>
+
+</div></div>
+
+<script>
+/* The Field — static mockup rendering. Real app projects live HRR vectors
+   via field.projection; here we sketch 516 dots in 7 category clusters with
+   the honest trust distribution (505 at 0.5 → mostly mid-saturation). */
+(function () {
+  const canvas = document.getElementById("field");
+  const wrap = canvas.parentElement;
+  const cats = [
+    { name: "user_pref", n: 259, h: 338, s: 45, cx: 0.38, cy: 0.42, r: 0.26 },
+    { name: "general",   n: 122, h: 0,   s: 0,  cx: 0.68, cy: 0.62, r: 0.22 },
+    { name: "project",   n: 53,  h: 205, s: 30, cx: 0.72, cy: 0.28, r: 0.15 },
+    { name: "tool",      n: 24,  h: 0,   s: 0,  cx: 0.25, cy: 0.74, r: 0.10 },
+    { name: "lesson",    n: 21,  h: 140, s: 15, cx: 0.52, cy: 0.80, r: 0.09 },
+    { name: "seed",      n: 21,  h: 30,  s: 25, cx: 0.18, cy: 0.22, r: 0.09 },
+    { name: "session",   n: 16,  h: 270, s: 15, cx: 0.86, cy: 0.78, r: 0.08 },
+  ];
+  // deterministic PRNG so the mockup renders identically every open
+  let seed = 20260702;
+  function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+
+  function draw() {
+    const w = wrap.clientWidth, h = wrap.clientHeight, dpr = devicePixelRatio || 1;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    // depth: subtle radial gradient
+    const g = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w,h)/1.4);
+    g.addColorStop(0, "rgba(255,255,255,0.02)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+
+    // hairline grid every 80px
+    ctx.strokeStyle = "rgba(255,255,255,0.02)"; ctx.lineWidth = 1;
+    for (let x = 80; x < w; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    for (let y = 80; y < h; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+
+    seed = 20260702;
+    let selected = null;
+    for (const c of cats) {
+      for (let i = 0; i < c.n; i++) {
+        // gaussian-ish cluster scatter
+        const a = rnd() * Math.PI * 2, d = (rnd() + rnd() + rnd()) / 3 * c.r;
+        const x = (c.cx + Math.cos(a) * d * 1.35) * w;
+        const y = (c.cy + Math.sin(a) * d) * h;
+        // honest trust: ~2% at 0.6 (brighter), ~0.4% below 0.3 (dim), rest 0.5
+        const roll = rnd();
+        const trust = roll > 0.98 ? 0.6 : roll < 0.004 ? 0.25 : 0.5;
+        const sat = c.s * (0.4 + trust * 0.6) / 0.7;
+        const lit = 38 + trust * 34;
+        ctx.beginPath();
+        ctx.arc(x, y, 2 + rnd() * 1.2, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${c.h}, ${sat}%, ${lit}%, ${0.55 + trust * 0.45})`;
+        ctx.fill();
+        if (c.name === "project" && i === 40) selected = { x, y };
+      }
+    }
+
+    // selected dot: pink ring (acting on) + tooltip anchor
+    if (selected) {
+      ctx.beginPath(); ctx.arc(selected.x, selected.y, 6, 0, Math.PI * 2);
+      ctx.strokeStyle = "#db3776"; ctx.lineWidth = 1.25; ctx.stroke();
+      ctx.beginPath(); ctx.arc(selected.x, selected.y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = "hsl(205, 40%, 62%)"; ctx.fill();
+      const tip = document.getElementById("tip");
+      tip.style.left = Math.min(selected.x + 14, w - 264) + "px";
+      tip.style.top = Math.min(selected.y + 12, h - 130) + "px";
+    }
+  }
+  draw();
+  addEventListener("resize", draw);
+})();
+</script>
+</body>
+</html>

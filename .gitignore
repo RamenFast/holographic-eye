@@ -1,0 +1,10 @@
+# compiled/vendored artifacts — everything here regenerates from PLAN.md
+build/eye_frontend/node_modules/
+build/eye_frontend/dist/
+build/eye_shell/src-tauri/target/
+build/eye_shell/src-tauri/gen/
+build/eye_icons/out/
+__pycache__/
+*.pyc
+*.deb
+nohup.out

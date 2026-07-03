@@ -1,0 +1,5 @@
+name: holographic-eye-commands
+version: 0.1.0
+description: /holo slash command — status window into The Holographic Eye
+author: Ben (compiled from PLAN.md by Claude)
+kind: standalone
