@@ -8,7 +8,7 @@
    highlight, lens, halo) or while transient effects are animating.
    Idle cost target: <1% CPU. GPLv3 — see LICENSE. */
 
-import { store, catColor, fid, Fact } from "./state";
+import { store, catColor, fid, Fact, theme, rgba } from "./state";
 
 interface Effect {
   kind: "arrival" | "ripple" | "bankpulse" | "trust";
@@ -47,7 +47,7 @@ export class Field {
   private tooltipTimer: number | undefined;
 
   constructor(container: HTMLElement) {
-    this.canvas = container.querySelector("canvas")!;
+    this.canvas = container.querySelector("canvas.fieldc")!;
     this.ctx = this.canvas.getContext("2d")!;
     this.tooltip = container.querySelector<HTMLElement>(".tooltip")!;
     this.mathLog = container.querySelector<HTMLElement>(".mathlog")!;
@@ -57,6 +57,7 @@ export class Field {
     store.on("entities", () => this.requestDraw());   // entity highlight lives here
     store.on("trustlens", () => this.requestDraw());
     store.on("halo", () => this.requestDraw());
+    store.on("theme", () => this.requestDraw());      // dots re-ink with the room
     new ResizeObserver(() => this.requestDraw()).observe(this.canvas);
     this.requestDraw();
   }
@@ -289,7 +290,8 @@ export class Field {
 
     // hairline grid only — the old radial "depth" gradient banded into
     // visible rings on near-black displays (feedback r2 #1)
-    ctx.strokeStyle = "rgba(255,255,255,0.02)"; ctx.lineWidth = 1;
+    ctx.strokeStyle = rgba(theme.inkRgb, theme.dark ? 0.025 : 0.05);
+    ctx.lineWidth = 1;
     for (let x = 80; x < w; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
     for (let y = 80; y < h; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
 
@@ -305,7 +307,7 @@ export class Field {
       const [sx, sy] = this.toScreen(e.x, e.y);
       ctx.beginPath();
       ctx.arc(sx, sy, 30 + t * 160, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(241,191,64,${0.08 * (1 - t)})`;
+      ctx.strokeStyle = rgba(theme.numericsRgb, 0.08 * (1 - t));
       ctx.lineWidth = 20; ctx.stroke();
     }
 
@@ -317,13 +319,13 @@ export class Field {
       if (f.has_vector) continue;
       ctx.beginPath(); ctx.arc(ringX, ringY, 3, 0, Math.PI * 2);
       ctx.strokeStyle = f.fact_id === this.hoverId
-        ? "#db3776" : "rgba(185,205,219,0.75)";
+        ? theme.acting : rgba(theme.inkRgb, 0.6);
       ctx.lineWidth = 1; ctx.stroke();
       this.stripHits.push({ x: ringX, y: ringY, id: f.fact_id });
       ringX += 10;
     }
     if (ringX > 16) {
-      ctx.fillStyle = "rgba(185,205,219,0.55)";
+      ctx.fillStyle = rgba(theme.inkRgb, 0.5);
       ctx.font = "10px ui-monospace, monospace";
       ctx.fillText("no hrr_vector — hover a ring to see why", ringX + 8, ringY + 3);
     }
@@ -361,18 +363,18 @@ export class Field {
 
       if (store.selection.has(f.fact_id)) {
         ctx.beginPath(); ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = "#db3776"; ctx.lineWidth = 1.25; ctx.stroke();
+        ctx.strokeStyle = theme.acting; ctx.lineWidth = 1.25; ctx.stroke();
       } else if (f.fact_id === this.hoverId) {
         ctx.beginPath(); ctx.arc(sx, sy, r + 3, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(219,55,118,0.6)"; ctx.lineWidth = 1; ctx.stroke();
+        ctx.strokeStyle = rgba(theme.actingRgb, 0.6); ctx.lineWidth = 1; ctx.stroke();
       } else if (highlightOn && store.entityHighlight.has(f.fact_id)) {
         // entity highlight: ring the structural hits, don't just dim the rest
         ctx.beginPath(); ctx.arc(sx, sy, r + 3, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(219,55,118,0.45)"; ctx.lineWidth = 1; ctx.stroke();
+        ctx.strokeStyle = rgba(theme.actingRgb, 0.45); ctx.lineWidth = 1; ctx.stroke();
       }
       if (halo && halo.factIds.has(f.fact_id)) {
         ctx.beginPath(); ctx.arc(sx, sy, r + 5, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(241,191,64,0.8)"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = rgba(theme.numericsRgb, 0.8); ctx.lineWidth = 2; ctx.stroke();
       }
     }
 
@@ -385,7 +387,7 @@ export class Field {
       const [sx, sy] = this.toScreen(e.x, e.y);
       ctx.beginPath();
       ctx.arc(sx, sy, 2 + t * 38, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(241,191,64,${0.4 * (1 - t)})`;
+      ctx.strokeStyle = rgba(theme.numericsRgb, 0.4 * (1 - t));
       ctx.lineWidth = 1; ctx.stroke();
     }
 
@@ -402,14 +404,14 @@ export class Field {
         const [px, py] = this.toScreen(sx / n, sy / n);
         const breathe = reducedMotion ? 1 : 0.6 + 0.4 * Math.abs(Math.sin(now / 1200 * Math.PI));
         ctx.beginPath(); ctx.arc(px, py, 16 * breathe + 8, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(241,191,64,0.55)"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.strokeStyle = rgba(theme.numericsRgb, 0.55); ctx.lineWidth = 1.5; ctx.stroke();
       }
     }
 
     // drag-select rectangle
     if (this.dragRect) {
       const r = this.dragRect;
-      ctx.strokeStyle = "rgba(219,55,118,0.5)"; ctx.lineWidth = 1;
+      ctx.strokeStyle = rgba(theme.actingRgb, 0.5); ctx.lineWidth = 1;
       ctx.strokeRect(Math.min(r.x0, r.x1), Math.min(r.y0, r.y1),
                      Math.abs(r.x1 - r.x0), Math.abs(r.y1 - r.y0));
     }

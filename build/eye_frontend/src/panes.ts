@@ -3,7 +3,7 @@
    GPLv3 — see LICENSE. */
 
 import { rpc, toolRead } from "./api";
-import { store, fid, EyeEvent, CAT_HUES } from "./state";
+import { store, fid, EyeEvent, CAT_HUES, catColor } from "./state";
 import { escapeHtml } from "./field";
 import { openWorkbench, openFft, openEditPreview, openDeleteModal } from "./modals";
 
@@ -411,7 +411,7 @@ export class Inspect {
       fact = store.facts.get(id);
     }
     if (!fact) return;
-    const catHue = CAT_HUES[fact.category]?.[0] ?? 0;
+    const catInk = catColor(fact.category, 0.85);
     const trust = Number(fact.trust_score);
     const local = store.facts.get(id);
     const entChips = (fact.links ?? []).map((l: any) =>
@@ -422,7 +422,7 @@ export class Inspect {
       <div class="pane-label">Inspect</div>
       <div class="factid">${fid(id)}</div>
       <div class="inspect-body">
-        <div class="chips"><span class="chip-cat" style="color:hsl(${catHue},40%,65%)">${escapeHtml(fact.category.toUpperCase())}</span></div>
+        <div class="chips"><span class="chip-cat" style="color:${catInk}">${escapeHtml(fact.category.toUpperCase())}</span></div>
         <div class="tags">${escapeHtml(fact.tags || "no tags")}</div>
         <div class="content" id="ins-content">${escapeHtml(fact.content)}</div>
         <div class="editlinks">
@@ -432,7 +432,7 @@ export class Inspect {
         </div>
         <div class="kv">
           <span class="k">trust</span>
-          <span><span class="trustbar"><span class="fill" style="width:${trust * 100}%;background:hsl(${catHue},40%,55%)"></span><span class="minline" style="left:${(store.stats.min_trust ?? 0.3) * 100}%" title="min_trust ${store.stats.min_trust ?? 0.3} — prefetch/search floor"></span></span> <span class="v">${trust.toFixed(2)}</span></span>
+          <span><span class="trustbar"><span class="fill" style="width:${trust * 100}%;background:${catColor(fact.category, 0.7)}"></span><span class="minline" style="left:${(store.stats.min_trust ?? 0.3) * 100}%" title="min_trust ${store.stats.min_trust ?? 0.3} — prefetch/search floor"></span></span> <span class="v">${trust.toFixed(2)}</span></span>
           <span class="k">retrievals</span><span class="v">${fact.journal_retrievals ?? local?.retrieval_count ?? 0}× <span class="k">(journal-observed)</span></span>
           <span class="k">helpful</span><span class="v">${fact.helpful_count}×</span>
         </div>
