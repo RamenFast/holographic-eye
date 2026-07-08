@@ -31,7 +31,8 @@ The stream at the foot is the journal, live. The flowers are flowers.
 2. The wrapper provider deployed and selected — see *Install the
    provider* below.
 3. The gateway **booted** (`hermes gateway start`). The control plane
-   at `127.0.0.1:8770` wakes lazily on the first agent message.
+   at `127.0.0.1:8770` boot-warms with it — up ~1 s after the gateway,
+   no agent message needed (v1.0.2, D-0015).
 
 ## Install
 

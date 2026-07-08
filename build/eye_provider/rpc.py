@@ -19,7 +19,7 @@ _PASSTHROUGH_ACTIONS = {"search", "probe", "related", "reason", "contradict", "l
 
 
 def dispatch(plane, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    prov = plane.provider
+    prov = plane.active_provider()
     if prov is None:
         return {"error": "no provider attached"}
 

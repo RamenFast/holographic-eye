@@ -70,12 +70,36 @@ def ensure_control_plane(provider) -> "EyeControlPlane":
         return _singleton
 
 
+def ensure_control_plane_boot(provider) -> "EyeControlPlane":
+    """Start the plane (once per process) and set *provider* as its
+    persistent fallback data source.
+
+    Used at gateway boot (D-0015): since the TUI moved agent turns into
+    ``tui_gateway.slash_worker`` subprocesses, the per-session
+    ``initialize()`` that used to wake the plane no longer fires in the
+    gateway — so :8770 stayed dormant until an api_server/Telegram turn
+    happened to arrive in-process. Warming a dedicated provider here makes
+    :8770 live from process start, independent of where sessions run. The
+    same failed-bind-is-retryable contract as ``ensure_control_plane``
+    holds (a lingering socket from the outgoing gateway must not be
+    remembered as permanently broken)."""
+    global _singleton
+    with _singleton_lock:
+        if _singleton is None:
+            plane = EyeControlPlane(provider._config)
+            plane.start()
+            _singleton = plane
+        _singleton.attach_boot(provider)
+        return _singleton
+
+
 class EyeControlPlane:
     def __init__(self, config: dict):
         self.config = config or {}
         self.port = int(self.config.get("port", 8770))
         self.bind = str(self.config.get("bind", "127.0.0.1"))
-        self.provider = None
+        self.provider = None          # live per-session provider (may be None)
+        self._boot_provider = None    # persistent gateway-boot fallback (D-0015)
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._clients: List["queue.Queue"] = []
@@ -118,6 +142,22 @@ class EyeControlPlane:
         self.provider = provider
         if provider.journal is not None:
             provider.journal.add_listener(self._on_event)
+
+    def attach_boot(self, provider) -> None:
+        """Set the persistent gateway-boot provider — the plane's fallback
+        data source so :8770 serves real data from process start, even when
+        no per-session provider is attached (TUI turns run in slash_worker
+        subprocesses; D-0015). Never nulled by session detach."""
+        self._boot_provider = provider
+        if provider.journal is not None:
+            provider.journal.add_listener(self._on_event)
+
+    def active_provider(self):
+        """The provider the plane reads through: the live per-session
+        provider when one is attached, else the persistent boot provider.
+        Both read the same on-disk store/journal (WAL), so a fallback read
+        is byte-identical to a live-session read."""
+        return self.provider if self.provider is not None else self._boot_provider
 
     def detach(self, provider) -> None:
         if self.provider is provider:
@@ -168,7 +208,7 @@ class EyeControlPlane:
 
     def stats(self) -> Dict[str, Any]:
         from . import __version__, accel
-        prov = self.provider
+        prov = self.active_provider()
         out: Dict[str, Any] = {
             "ok": prov is not None,
             "version": __version__,
@@ -233,7 +273,7 @@ class EyeControlPlane:
 def _make_handler(plane: EyeControlPlane):
     class EyeHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-        server_version = "HolographicEye/1.0.1"
+        server_version = "HolographicEye/1.0.2"
 
         def log_message(self, fmt, *args):
             logger.debug("eye-http: " + fmt, *args)
@@ -270,7 +310,7 @@ def _make_handler(plane: EyeControlPlane):
                 from . import __version__
                 self._send_json({"ok": True, "app": "holographic-eye",
                                  "version": __version__,
-                                 "attached": plane.provider is not None})
+                                 "attached": plane.active_provider() is not None})
             elif path == "/stats":
                 if not self._authed():
                     return self._deny()
@@ -295,7 +335,7 @@ def _make_handler(plane: EyeControlPlane):
                 params = body.get("params") or {}
             except Exception as e:
                 return self._send_json({"error": f"bad request: {e}"}, status=400)
-            if plane.provider is None:
+            if plane.active_provider() is None:
                 return self._send_json({"error": "no provider attached"}, status=503)
             try:
                 result = plane.rpc(method, params)

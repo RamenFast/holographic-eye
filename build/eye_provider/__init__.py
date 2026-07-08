@@ -34,10 +34,17 @@ from .journal import EyeJournal
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 _MUTATING_FACT_ACTIONS = {"add", "update", "remove"}
 _READ_FACT_ACTIONS = {"search", "probe", "related", "reason", "contradict", "list"}
+
+# Gateway boot-warm (D-0015): the dedicated provider whose store + journal
+# back the control plane from process start, plus a once-per-process guard
+# so discovery's repeated register() calls spawn exactly one warm thread.
+_boot_provider: Optional["EyeMemoryProvider"] = None
+_boot_warm_started = False
+_boot_warm_lock = threading.Lock()
 
 
 def _is_gateway_process() -> bool:
@@ -106,6 +113,10 @@ class EyeMemoryProvider(MemoryProvider):
     # -- lifecycle -----------------------------------------------------------
 
     def initialize(self, session_id: str, **kwargs) -> None:
+        # boot-warm marker (D-0015): pop before delegating so the inner
+        # provider never sees this private flag; it selects the boot
+        # (fallback) control-plane attach instead of a per-session attach.
+        boot_warm = bool(kwargs.pop("_eye_boot_warm", False))
         self._inner.initialize(session_id, **kwargs)
         self._session_id = session_id
         # read-path acceleration (D-0012): memoize the bundled encoders —
@@ -153,8 +164,11 @@ class EyeMemoryProvider(MemoryProvider):
             self._control = None
         else:
             try:
-                from .control import ensure_control_plane
-                self._control = ensure_control_plane(self)
+                from .control import ensure_control_plane, ensure_control_plane_boot
+                self._control = (
+                    ensure_control_plane_boot(self) if boot_warm
+                    else ensure_control_plane(self)
+                )
             except Exception as e:
                 logger.warning("Eye control plane unavailable (journal-only): %s", e)
                 self._control = None
@@ -400,7 +414,68 @@ class EyeMemoryProvider(MemoryProvider):
         )
 
 
+def _maybe_boot_warm_control_plane() -> None:
+    """Start the control plane at gateway boot, once per process.
+
+    In the always-on gateway ONLY (``_is_gateway_process()``), spin up a
+    dedicated provider on a daemon thread so :8770 is live before any agent
+    message — even when every turn runs in a ``tui_gateway.slash_worker``
+    subprocess where the per-session ``initialize()`` never reaches this
+    process (D-0015). Fires at most once per process: discovery calls
+    ``register()`` on every scan and it must stay cheap, so the real work
+    (loading the inner provider, binding the port) happens off-thread."""
+    global _boot_warm_started
+    if not _is_gateway_process():
+        return
+    with _boot_warm_lock:
+        if _boot_warm_started:
+            return
+        _boot_warm_started = True
+    threading.Thread(target=_boot_warm_control_plane,
+                     name="eye-boot-warm", daemon=True).start()
+
+
+def _boot_warm_control_plane() -> None:
+    """Warm a dedicated provider and bind the plane; retry the bind a few
+    times so a socket lingering from the outgoing gateway across a restart
+    (the historical Errno 98) self-heals instead of leaving :8770 dark."""
+    global _boot_provider
+    try:
+        from hermes_constants import get_hermes_home
+        hermes_home = str(get_hermes_home())
+    except Exception:
+        hermes_home = ""
+    try:
+        prov = EyeMemoryProvider()
+        prov.initialize("__eye_boot__", platform="gateway-boot",
+                        hermes_home=hermes_home, _eye_boot_warm=True)
+    except Exception as e:
+        logger.warning("Eye boot-warm init failed (lazy start still applies): %s", e)
+        return
+    _boot_provider = prov  # strong ref for the process lifetime
+    if prov._control is not None:
+        logger.info("Eye control plane boot-warmed at gateway start")
+        return
+    # bind lost the race (outgoing gateway's socket not yet released) —
+    # retry just the bind; the port frees within a few seconds
+    from .control import ensure_control_plane_boot
+    for attempt in range(4):
+        time.sleep(1.5 + attempt)
+        try:
+            prov._control = ensure_control_plane_boot(prov)
+            logger.info("Eye control plane boot-warmed (bind retry %d)", attempt + 1)
+            return
+        except Exception as e:
+            logger.debug("Eye boot-warm bind retry %d failed: %s", attempt + 1, e)
+    logger.warning("Eye control plane did not bind :8770 at boot after retries; "
+                   "it will start on the next in-gateway session")
+
+
 def register(ctx) -> None:
     """Register the Eye wrapper provider (cheap: no journal/server here —
-    discovery calls this on every scan, see PLAN PART 3 Addendum 2)."""
+    discovery calls this on every scan, see PLAN PART 3 Addendum 2). In the
+    gateway process this also boot-warms the control plane off-thread so
+    :8770 is live from process start, not on the first in-gateway message
+    (D-0015)."""
     ctx.register_memory_provider(EyeMemoryProvider())
+    _maybe_boot_warm_control_plane()
