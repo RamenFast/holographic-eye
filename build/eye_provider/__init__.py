@@ -34,8 +34,20 @@ from .journal import EyeJournal
 
 logger = logging.getLogger(__name__)
 
+__version__ = "1.0.0"
+
 _MUTATING_FACT_ACTIONS = {"add", "update", "remove"}
 _READ_FACT_ACTIONS = {"search", "probe", "related", "reason", "contradict", "list"}
+
+
+def _is_gateway_process() -> bool:
+    """True only in the always-on gateway (`hermes gateway run` /
+    the systemd unit) — the one process that owns port 8770."""
+    try:
+        import sys
+        return "gateway" in [a.lower() for a in sys.argv]
+    except Exception:
+        return False
 
 
 def _load_eye_config() -> dict:
@@ -96,6 +108,16 @@ class EyeMemoryProvider(MemoryProvider):
     def initialize(self, session_id: str, **kwargs) -> None:
         self._inner.initialize(session_id, **kwargs)
         self._session_id = session_id
+        # read-path acceleration (D-0012): memoize the bundled encoders —
+        # zero upstream diffs (I1), byte-identical results (I2), probe
+        # drops from ~4 s to ~ms; prewarm runs off the critical path
+        try:
+            from . import accel
+            if accel.install(self._inner, self._config) and self.store is not None:
+                accel.prewarm(self.store,
+                              getattr(self.store, "hrr_dim", 1024))
+        except Exception as e:
+            logger.debug("Eye accel skipped: %s", e)
         try:
             from hermes_constants import get_hermes_home
             journal_path = str(self._config.get(
@@ -115,14 +137,17 @@ class EyeMemoryProvider(MemoryProvider):
         except Exception as e:
             logger.warning("Eye journal unavailable (degrading to stock): %s", e)
             self._journal = None
-        # The control plane belongs to the always-on gateway. Transient CLI
-        # processes skip it (else they'd steal port 8770 from the gateway and
-        # die with it); config control_plane: always overrides for CLI-only
-        # setups. Journaling is unaffected either way.
+        # The control plane belongs to the always-on gateway. Every other
+        # hermes process — chat CLI, `hermes dashboard`, `memory status`
+        # probes — must not steal port 8770 and die (or linger) with it.
+        # The old platform=="cli" test missed the dashboard (2026-07-07:
+        # a long-lived dashboard held 8770 across a gateway upgrade), so
+        # auto now keys on the process itself: only `... gateway run`
+        # hosts the plane. control_plane: always|never still overrides.
         cp_policy = str(self._config.get("control_plane", "auto"))
         skip_cp = (
             cp_policy == "never"
-            or (cp_policy == "auto" and kwargs.get("platform", "") == "cli")
+            or (cp_policy == "auto" and not _is_gateway_process())
         )
         if skip_cp:
             self._control = None

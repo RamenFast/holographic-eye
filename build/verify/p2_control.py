@@ -138,6 +138,9 @@ def main(tmp: Path):
     inner = HolographicMemoryProvider(config={"db_path": str(db)})
     wrapped = eye_mod.EyeMemoryProvider(
         config={"journal_path": str(tmp / "journal.db"), "mode": "journal",
+                # auto policy hosts the plane only in `hermes gateway run`
+                # (port-theft fix) — the harness must opt in explicitly
+                "control_plane": "always",
                 "port": PORT}, inner=inner)
     wrapped.initialize("p2-verify")
     token = wrapped._control.token
