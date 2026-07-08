@@ -3,7 +3,9 @@
    GPLv3 — see LICENSE. */
 
 import { rpc } from "./api";
-import { store, fid, CAT_HUES, catColor } from "./state";
+import { store, fid, CAT_HUES, catColor, THEMES, theme, applyTheme,
+         rgba } from "./state";
+import { regrowGarden } from "./garden";
 import { escapeHtml } from "./field";
 
 let fieldRef: any = null;
@@ -140,11 +142,11 @@ export async function openFft(factId: number, fact: any): Promise<void> {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const colors: Record<string, string> = {
       fact: catColor(fact.category, 0.9),
-      entity: "#db3776",
-      bank: "rgba(241,191,64,0.55)",
+      entity: theme.acting,
+      bank: rgba(theme.numericsRgb, 0.55),
     };
     const W = canvas.width, H = canvas.height - 18;
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.strokeStyle = rgba(theme.inkRgb, 0.12);
     ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
     let legend = "";
     for (const trace of res.traces) {
@@ -155,12 +157,12 @@ export async function openFft(factId: number, fact: any): Promise<void> {
         const y = H - bins[i] * (H - 8) - 4;
         x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = colors[trace.kind] ?? "#9fb3c2";
+      ctx.strokeStyle = colors[trace.kind] ?? theme.textDim;
       ctx.lineWidth = 1;
       ctx.stroke();
       legend += `<span style="color:${colors[trace.kind]}">■</span> ${escapeHtml(trace.label)} &nbsp;`;
     }
-    ctx.fillStyle = "#9fb3c2"; ctx.font = "10px ui-monospace, monospace";
+    ctx.fillStyle = theme.textDim; ctx.font = "10px ui-monospace, monospace";
     for (const bin of [0, 256, 512, 768, 1023]) {
       ctx.fillText(String(bin), (bin / 1023) * (W - 30), canvas.height - 4);
     }
@@ -392,8 +394,9 @@ function legendHtml(): string {
       <span class="k">gold ring</span><span>above the Reason Workbench threshold — would be recalled</span>
       <span class="k">hollow rings (strip)</span><span>facts with no HRR vector — outside the algebra until backfilled</span>
     </div>
-    <div class="pane-hint">palette lives in <b>styles.css</b> (:root tokens) and <b>src/state.ts CAT_HUES</b> —
-      Blossom rule: pink = what you're acting on, gold = the reference you act against, red = danger.</div>`;
+    <div class="pane-hint">themes are palette rows (⚙ → theme, the sysmon/Phosphor way); the
+      semantic rule survives every room: <b>accent</b> = what you're acting on,
+      <b>gold/value</b> = the reference you act against, red = danger.</div>`;
 }
 
 function glossaryHtml(): string {
@@ -440,6 +443,15 @@ export function openSettings(): void {
       terminology live in the <a id="st-manual">? manual</a> (one canonical copy).</div>
 
     <div class="ep-label">appearance</div>
+    <div class="st-row"><span class="st-k">theme</span>
+      <span class="theme-grid">${THEMES.map((t) => `
+        <span class="theme-chip${t.id === theme.id ? " active" : ""}" data-th="${t.id}"
+          style="background:${t.bg};color:${t.ink};border-color:${t.accent}">
+          <i style="background:${t.accent}"></i>${escapeHtml(t.label)}</span>`).join("")}
+      </span>
+      <span class="st-why">palette rows in the sysmon/Phosphor way — every canvas, dot and
+        flower re-inks with the room. Blossom AMOLED is the original v3 true-black look.
+        Remembered on this machine.</span></div>
     <div class="st-row"><span class="st-k">text size</span>
       <select id="st-scale">
         <option value="0.85"${scale === "0.85" ? " selected" : ""}>small · 85%</option>
@@ -450,8 +462,10 @@ export function openSettings(): void {
       <span class="st-why">scales every label and number in the app — remembered on this machine.</span></div>
     <div class="st-row"><span class="st-k">pixel garden</span>
       <label class="st-check"><input type="checkbox" id="st-garden"${garden ? " checked" : ""}>
-        flowers + cottage along the window edges</label>
-      <span class="st-why">purely decorative — switch it off for a bare instrument panel.</span></div>
+        flowerbed lane + vines + cottage</label>
+      <span class="st-why">purely decorative and grown fresh each launch (seeded, never tiled);
+        it lives in its own lane and behind the Field, so it can never cover data.
+        Switch it off for a bare instrument panel.</span></div>
 
     <div class="ep-label">projection</div>
     <div class="st-row"><span class="st-k">refit</span>
@@ -472,6 +486,14 @@ export function openSettings(): void {
       <span class="st-why">the control plane is loopback-only and bearer-token authed
         (~/.hermes/eye_token) — forget the stored copy if you pasted it on a shared browser.</span></div>`, 640);
   back.querySelector<HTMLElement>("#st-manual")!.onclick = () => openHelp();
+  back.querySelectorAll<HTMLElement>(".theme-chip").forEach((chip) => {
+    chip.onclick = () => {
+      applyTheme(chip.dataset.th!);
+      regrowGarden();
+      back.querySelectorAll<HTMLElement>(".theme-chip").forEach((c) =>
+        c.classList.toggle("active", c === chip));
+    };
+  });
   back.querySelector<HTMLSelectElement>("#st-scale")!.onchange = (e) => {
     localStorage.setItem("eyeUiScale", (e.target as HTMLSelectElement).value);
     applyUiPrefs();
@@ -480,6 +502,7 @@ export function openSettings(): void {
     localStorage.setItem("eyeGarden",
       (e.target as HTMLInputElement).checked ? "on" : "off");
     applyUiPrefs();
+    regrowGarden(); // canvases were display:none while off — sizes stale
   };
   back.querySelector<HTMLElement>("#st-refit")!.onclick = async () => {
     await (window as any).eyeRefit();

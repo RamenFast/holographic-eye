@@ -75,6 +75,11 @@ class EyeJournal:
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         self._listeners: List[Callable[[Dict[str, Any]], None]] = []
+        # incremental retrieval_counts cache — the journal is append-only
+        # and responses are immutable (undo appends, never rewrites), so
+        # counting only events newer than the last scan is exact
+        self._retr_counts: Dict[int, int] = {}
+        self._retr_last_id = 0
         with self._lock:
             try:
                 self._conn.execute("PRAGMA journal_mode=WAL")
@@ -198,21 +203,33 @@ class EyeJournal:
         The fork's retriever never increments facts.retrieval_count (see
         PLAN PART 3 Addendum 2), so the Eye counts appearances of fact_ids
         in journaled read results + prefetch injections instead.
+
+        Incremental (D-0012): the first call scans history; later calls
+        parse only events appended since — this runs on every Inspect
+        click and every reprojection, and a week-long journal made the
+        full scan the slowest thing in the click path.
         """
-        counts: Dict[int, int] = {}
         with self._lock:
             rows = self._conn.execute(
                 """
-                SELECT response FROM events
-                WHERE source IN ('tool', 'prefetch')
+                SELECT event_id, response FROM events
+                WHERE event_id > ?
+                  AND source IN ('tool', 'prefetch')
                   AND kind IN ('search','probe','related','reason','prefetch')
                   AND response IS NOT NULL
-                """
+                ORDER BY event_id
+                """,
+                (self._retr_last_id,),
             ).fetchall()
-        for (resp,) in rows:
-            for fid in _fact_ids_in_response(resp):
-                counts[fid] = counts.get(fid, 0) + 1
-        return counts
+            last = self._conn.execute(
+                "SELECT MAX(event_id) FROM events"
+            ).fetchone()[0]
+            for event_id, resp in rows:
+                for fid in _fact_ids_in_response(resp):
+                    self._retr_counts[fid] = self._retr_counts.get(fid, 0) + 1
+            if last:
+                self._retr_last_id = max(self._retr_last_id, int(last))
+            return dict(self._retr_counts)
 
     # -- listeners -----------------------------------------------------------
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "holographic-eye",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "dev.ben.holographic-eye",
   "build": {
     "frontendDist": "../ui"
@@ -14,7 +14,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb"],
+    "targets": [
+      "deb",
+      "rpm"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -23,7 +26,7 @@
     ],
     "category": "Utility",
     "shortDescription": "Glass cockpit for the Hermes holographic memory",
-    "longDescription": "The Holographic Eye — live console and curation desk for the Hermes holographic memory provider. Watch the agent's memory as its real HRR geometry, review and undo every write, merge junk entities, and ask the agent itself to revise its memory.",
+    "longDescription": "The Holographic Eye \u2014 live console and curation desk for the Hermes holographic memory provider. Watch the agent's memory as its real HRR geometry, review and undo every write, merge junk entities, and ask the agent itself to revise its memory.",
     "linux": {
       "deb": {
         "depends": [],

@@ -54,12 +54,18 @@ _singleton: Optional["EyeControlPlane"] = None
 
 
 def ensure_control_plane(provider) -> "EyeControlPlane":
-    """Start (once per process) and attach the provider to the control plane."""
+    """Start (once per process) and attach the provider to the control plane.
+
+    The singleton is published only after a successful bind — a failed
+    start (port taken by a process that will die, e.g. the 2026-07-07
+    dashboard port-theft) must be retried on the next initialize, not
+    remembered as a permanently broken plane."""
     global _singleton
     with _singleton_lock:
         if _singleton is None:
-            _singleton = EyeControlPlane(provider._config)
-            _singleton.start()
+            plane = EyeControlPlane(provider._config)
+            plane.start()
+            _singleton = plane
         _singleton.attach(provider)
         return _singleton
 
@@ -161,13 +167,16 @@ class EyeControlPlane:
         return bool(supplied) and hmac.compare_digest(supplied, self.token)
 
     def stats(self) -> Dict[str, Any]:
+        from . import __version__, accel
         prov = self.provider
         out: Dict[str, Any] = {
             "ok": prov is not None,
+            "version": __version__,
             "mode": getattr(prov, "_mode", None),
             "session_id": getattr(prov, "_session_id", ""),
             "ws_clients": self.client_count,
             "uptime_s": round(time.time() - self.started_at, 1),
+            "accel": accel.stats(),
         }
         store = prov.store if prov else None
         if store is not None:
@@ -224,7 +233,7 @@ class EyeControlPlane:
 def _make_handler(plane: EyeControlPlane):
     class EyeHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-        server_version = "HolographicEye/0.1"
+        server_version = "HolographicEye/1.0"
 
         def log_message(self, fmt, *args):
             logger.debug("eye-http: " + fmt, *args)
@@ -258,7 +267,9 @@ def _make_handler(plane: EyeControlPlane):
         def do_GET(self):
             path = urlparse(self.path).path
             if path == "/health":
+                from . import __version__
                 self._send_json({"ok": True, "app": "holographic-eye",
+                                 "version": __version__,
                                  "attached": plane.provider is not None})
             elif path == "/stats":
                 if not self._authed():

@@ -26,10 +26,15 @@ honest settings) plus the delight backlog (flower variety, cottage, text-size
 setting) are live and verified: idle canvas draws 0/5s (was ~300),
 Playwright-driven acceptance on every changed affordance — D-0010 below.
 
-**→ Next session: start from `HANDOFF.md`** (top candidate: the inner
-provider's `probe()` re-encodes every fact's content vector per call —
-measured ~4s per entity click on 518 facts; a content-vector cache upstream
-would make it ~ms. See D-0010 item 8.)
+**v1.0.0 SHIPPED 2026-07-07** (session 3, Ben directing): probe latency
+fixed (~4 s → ~40 ms, runtime memoization in the wrapper — D-0012),
+chrome rebased on the sysmon/Phosphor palette-row system with 10 themes
+(D-0011), pixel garden rebuilt procedural + coverage-proof (D-0013),
+app icon drawn by the Phosphor engine itself (D-0014), first GitHub
+release with .deb + .rpm + source + checksums. Release law adopted:
+every commit landing on master IS a release and gets rebuilt.
+
+**→ Next session: start from `HANDOFF.md`.**
 
 **Open threads for a future session:**
 - Overnight/week soak observation (journal is accumulating; nothing to do
@@ -216,9 +221,12 @@ The Eye ships its own set in that language:
 
 ## Anti-goals (kept from the draft)
 
-No 3D field, no dark/light toggle, no success toasts, no AI-generated splash art,
-no bounce/spring physics; honest about being a database tool with taste. Glass is
-deliberate; on Cinnamon, harmonize with Muffin chrome, don't fight it.
+No 3D field, no success toasts, no AI-generated splash art, no
+bounce/spring physics; honest about being a database tool with taste.
+Glass is deliberate; on Cinnamon, harmonize with Muffin chrome, don't
+fight it. ~~No dark/light toggle~~ — retired by D-0011 (Ben directed
+the sysmon/Phosphor palette-row rebuild, 2026-07-07); the single-look
+rule is superseded by ten equal-care token rows.
 
 
 ---
@@ -1329,7 +1337,8 @@ Ben's first hands-on pass produced 13 items; all applied same session:
 
 - Status: **logged, deliberately deferred** (Ben: "not going to have you fix
   everything here right now").
-- Full table with root causes: `feedback/2026-07-02-round2.md` (+ screenshots).
+- Full table with root causes: `docs/dev/feedback/2026-07-02-round2.md`
+  (+ screenshots; moved from `feedback/` in the v1.0.0 hygiene pass).
 - Chosen priorities (stability + clarity, polish-only): **P-1** render
   discipline & idle cost (dirty-flag canvas → <1% idle CPU; remove
   gradient-banding "circles"; one bottom info lane; scrollbar gutter);
@@ -1397,6 +1406,97 @@ Ben's first hands-on pass produced 13 items; all applied same session:
     bottom-right (flowers grow in front of its doorstep); ⚙ appearance →
     "pixel garden" checkbox (`body.no-garden`), persisted in
     `localStorage.eyeGarden`.
+
+## D-0011 — Chrome rebased on the sysmon/Phosphor palette-row system (2026-07-07)
+
+- Status: **applied + verified** (Ben's direction: "base UI in the
+  sysmon/Phosphor way (rebuild if needed)"). Supersedes the PART 2
+  anti-goal "no dark/light toggle".
+
+### Decision
+Themes are token rows, the house way (phosphor `theme.rs` → sysmon
+`gui/theme.rs` → the Eye's `styles.css`): ten palettes as
+`html[data-theme]` CSS custom-property blocks — **Blossom Dark**
+(fresh default, the family's wanted default), Blossom, **Blossom
+AMOLED** (the Eye's own v3 true-black identity, preserved verbatim),
+Light, Dark, Funky Pink, Paper, Basalt, Amber CRT, Chromacore. A TS
+theme bridge (`state.ts`) mirrors the active row so every canvas
+(Field, FFT, garden) draws with the DOM's tokens; `catColor` is
+light/dark aware (vivid = trusted in every room). Carved stone
+buttons from each palette's stone triple (bevel inverts on press;
+shape never changes, surface does). Sharp corners everywhere — the
+last border-radii died in this pass. Picker: ⚙ → theme chips, each
+chip wearing its own palette; persisted `localStorage.eyeTheme`,
+stamped pre-paint by index.html.
+
+### Why
+One hardcoded look violated the house rule that every surface Ben owns
+reads as one system; sysmon and phosphor already proved the rows. The
+Eye's semantic law survives per-room: --acting (accent) = what you act
+on, --numerics/--reference (value) = what you act against, red = danger.
+
+## D-0012 — Read-path acceleration in the wrapper; port-theft fix (2026-07-07)
+
+- Status: **applied + verified live** (probe 4.18 s → 0.09 s cold /
+  0.04 s warm on 541 facts; Workbench 143 ms through the full UI;
+  p1 + p2 harnesses ALL-PASS).
+
+### Decision
+`accel.py` memoizes the bundled `encode_atom`/`encode_text` **at
+runtime** from the wrapper — zero upstream file diffs (I1 intact);
+atoms are SHA-256-deterministic (Q2) so cached vectors are
+byte-identical (I2, re-proven by the equivalence harness). Cached
+arrays are read-only (accidental upstream mutation raises, never
+poisons). Background prewarm from a private read-only connection
+(534 vectors, ~20 ms warm-atom case). LRU-bounded: 8192 atoms + 4096
+texts (≤ 96 MB worst case, ~few-thousand entries real). /stats
+carries cache telemetry. Config kill-switch:
+`plugins.holographic-eye.accel: false`.
+Also: `journal.retrieval_counts()` went incremental (append-only
+journal ⇒ exact), killing a full-journal scan per Inspect click; and
+the 2026-07-07 port-theft — a long-lived `hermes dashboard` held
+:8770 across a gateway upgrade serving stale code — is fixed twice:
+`auto` control-plane policy now requires `gateway` in argv, and
+`ensure_control_plane` publishes its singleton only after a
+successful bind (failed binds retry on the next initialize).
+
+## D-0013 — Pixel garden: procedural, palette-fed, coverage-proof (2026-07-07)
+
+- Status: **applied + verified** (Ben: "ensure flowers dont cover UI
+  elements" · "make the flowers a little more random, look to
+  symmetrical").
+
+### Decision
+The tiled repeat-x flowerbed (D-0008 #13) is gone. `garden.ts` grows
+the bed with a seeded RNG — six species, jittered spacing/height/
+lean/flip, one seed per launch (resize regrows the same garden; every
+launch is a new planting). Placement is structurally incapable of
+covering UI: the flowerbed lives in its **own grid-row lane** at the
+window's foot (nothing else exists there); vines + cottage moved
+inside the Field and z-ordered **under** the data canvas (dots always
+draw over decoration; clicks pass through). All garden colors derive
+from the active palette — the garden re-blooms with the theme. The
+stream's padding-bottom hack died with the overlay.
+
+## D-0014 — The icon is drawn by the Phosphor engine (2026-07-07)
+
+- Status: **applied** (Ben's direction: "blossom design (flowers
+  around eye, not blocking out) with an eye in the center. Blue.
+  Flowers pink/yellow. Made using the phosphor engine").
+
+### Decision
+`make_icons.py` v2 synthesizes each figure as a stereo WAV whose L/R
+channels trace a closed parametric curve, opens it in a **private
+background Phosphor instance** (own XDG dirs, volume 0 — the beam
+taps pre-volume, so it is silent), and snapshots the persistent XY
+beam per layer: Ice Blue almond eye + iris ring + pupil ring, six
+Vaporwave five-petal roses (r = cos 5θ, petal-fattened ^0.62) and
+four Solar Gold four-petal roses ringed around the eye with seeded
+jitter — never over it. Thirteen snapshots screen-blend onto a
+near-black plate; small sizes get an energy boost. One figure per
+snapshot is the law: a scope has no pen-up, and the draft's
+between-figure jumps drew a bright chord polygon. Outputs feed
+hicolor, the Tauri bundle set, and the GUI favicon.
 
 ---
 

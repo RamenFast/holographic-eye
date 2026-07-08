@@ -2,10 +2,11 @@
    Compiled from PLAN.md. GPLv3 — see LICENSE. */
 
 import { rpc, stats, openEvents, resetToken } from "./api";
-import { store, Fact, EyeEvent, fid } from "./state";
+import { store, Fact, EyeEvent, fid, initTheme } from "./state";
 import { Field, escapeHtml } from "./field";
 import { Stream } from "./stream";
 import { LeftColumn, Inspect, clearEntityHighlights } from "./panes";
+import { initGarden } from "./garden";
 import { setField, openWorkbench, openBackup, openHelp, openAskAgent,
          openSettings, applyUiPrefs } from "./modals";
 
@@ -165,7 +166,16 @@ function findOverlay(): void {
   const input = el.querySelector("input")!;
   const results = el.querySelector<HTMLElement>(".find-results")!;
   input.focus();
-  const close = () => el.remove();
+  // click-away dismiss that survives clicks INSIDE the overlay (the
+  // old {once:true} listener disarmed itself on the first inner click)
+  const close = () => {
+    el.remove();
+    removeEventListener("mousedown", onDocDown);
+  };
+  function onDocDown(e: MouseEvent): void {
+    if (!el.contains(e.target as Node)) close();
+  }
+  addEventListener("mousedown", onDocDown);
   input.onkeydown = (e) => { if (e.key === "Escape") close(); };
   input.oninput = () => {
     const q = input.value.toLowerCase();
@@ -178,9 +188,6 @@ function findOverlay(): void {
       row.onclick = () => { store.select([Number(row.dataset.id)]); close(); };
     });
   };
-  addEventListener("click", (e) => {
-    if (!el.contains(e.target as Node)) close();
-  }, { once: true });
 }
 
 function bindKeys(): void {
@@ -199,7 +206,12 @@ function bindKeys(): void {
     }
     if (inInput) return;
     if (e.key === "?") openHelp();
-    if (e.key === "F") findOverlay();
+    if (e.key === "F") {
+      // preventDefault or the opening "F" lands in the focused input
+      // and every search silently becomes "F…" (caught by break-test)
+      e.preventDefault();
+      findOverlay();
+    }
     if (e.key === "R") {
       const f = store.focusedFact ? store.facts.get(store.focusedFact) : null;
       openWorkbench(f?.entities.slice(0, 2) ?? []);
@@ -212,12 +224,14 @@ function bindKeys(): void {
 }
 
 async function boot(): Promise<void> {
+  initTheme();    // mirror the pre-paint theme stamp into the token bridge
   applyUiPrefs(); // persisted text size + garden toggle, before first paint
   field = new Field($("#field-wrap"));
   setField(field);
   new Stream($("#stream"));
   new LeftColumn($("#pane-left"));
   new Inspect($("#pane-inspect"));
+  initGarden();   // after prefs: respects body.no-garden
 
   (window as any).eyeRefresh = async () => {
     await Promise.all([loadProjection(), loadEntities(), refreshStats()]);

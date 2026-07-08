@@ -1,4 +1,7 @@
-/* Central state + pub/sub for the Eye. GPLv3 — see LICENSE. */
+/* Central state + pub/sub + the theme bridge for the Eye.
+   Palettes are CSS token rows (styles.css, the sysmon/Phosphor way,
+   D-0011); this module mirrors the active row into a typed object so
+   canvas code draws with the same tokens the DOM wears. GPLv3. */
 
 export interface Fact {
   fact_id: number;
@@ -109,6 +112,124 @@ class Store {
 
 export const store = new Store();
 
+// ---------------------------------------------------------------------------
+// Theme bridge (D-0011) — palette rows live in styles.css; this mirrors
+// the active row so the Field/FFT/garden draw with the DOM's tokens.
+// ---------------------------------------------------------------------------
+
+/* bg/ink/accent are PREVIEW swatches for the ⚙ theme chips only —
+   the real tokens live in styles.css; keep both in step. */
+export const THEMES: { id: string; label: string; dark: boolean;
+                       bg: string; ink: string; accent: string }[] = [
+  { id: "blossom_dark", label: "Blossom Dark", dark: true,
+    bg: "#281821", ink: "#f5eaef", accent: "#ec8fac" },
+  { id: "blossom", label: "Blossom", dark: false,
+    bg: "#fcf4f3", ink: "#2b2128", accent: "#c85a7c" },
+  { id: "amoled", label: "Blossom AMOLED", dark: true,
+    bg: "#0a0a0a", ink: "#eef8ff", accent: "#db3776" },
+  { id: "light", label: "Light", dark: false,
+    bg: "#ffffff", ink: "#0e1620", accent: "#0c94a2" },
+  { id: "dark", label: "Dark", dark: true,
+    bg: "#141019", ink: "#f0eaf0", accent: "#e78aa6" },
+  { id: "funky", label: "Funky Pink", dark: false,
+    bg: "#fff5fa", ink: "#4a1030", accent: "#e0218a" },
+  { id: "paper", label: "Paper", dark: false,
+    bg: "#faf6ec", ink: "#2e2920", accent: "#9c5c24" },
+  { id: "basalt", label: "Basalt", dark: true,
+    bg: "#181b1e", ink: "#e6ebf0", accent: "#7aa4c4" },
+  { id: "amber", label: "Amber CRT", dark: true,
+    bg: "#151008", ink: "#f4e3c2", accent: "#f0a830" },
+  { id: "chromacore", label: "Chromacore", dark: true,
+    bg: "#090f0c", ink: "#d2e8dc", accent: "#2fd27a" },
+];
+
+export interface ThemeTokens {
+  id: string;
+  dark: boolean;
+  base: string; raised: string; surface: string;
+  text: string; textDim: string; muted: string;
+  hairline: string; hairlineStrong: string;
+  acting: string; actingRgb: [number, number, number];
+  onActing: string; title: string;
+  numerics: string; numericsRgb: [number, number, number];
+  inkRgb: [number, number, number];
+  add: string; remove: string;
+  stone: string; stoneHi: string; stoneLo: string;
+}
+
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement)
+    .getPropertyValue(name).trim();
+}
+
+function parseRgbTriple(v: string, fallback: [number, number, number]):
+    [number, number, number] {
+  const parts = v.split(",").map((s) => parseInt(s.trim(), 10));
+  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+    return parts as [number, number, number];
+  }
+  return fallback;
+}
+
+function readTheme(): ThemeTokens {
+  const id = document.documentElement.dataset.theme || "blossom_dark";
+  const meta = THEMES.find((t) => t.id === id) ?? THEMES[0];
+  return {
+    id: meta.id,
+    dark: meta.dark,
+    base: cssVar("--ink-base"),
+    raised: cssVar("--ink-raised"),
+    surface: cssVar("--ink-surface"),
+    text: cssVar("--ink-text"),
+    textDim: cssVar("--ink-text-dim"),
+    muted: cssVar("--ink-muted"),
+    hairline: cssVar("--ink-hairline"),
+    hairlineStrong: cssVar("--hairline-strong"),
+    acting: cssVar("--acting"),
+    actingRgb: parseRgbTriple(cssVar("--acting-rgb"), [236, 143, 172]),
+    onActing: cssVar("--on-acting"),
+    title: cssVar("--title"),
+    numerics: cssVar("--numerics"),
+    numericsRgb: hexToRgb(cssVar("--numerics"), [232, 200, 126]),
+    inkRgb: parseRgbTriple(cssVar("--ink-rgb"), [245, 234, 239]),
+    add: cssVar("--signal-add"),
+    remove: cssVar("--signal-remove"),
+    stone: cssVar("--stone"),
+    stoneHi: cssVar("--stone-hi"),
+    stoneLo: cssVar("--stone-lo"),
+  };
+}
+
+function hexToRgb(hex: string, fallback: [number, number, number]):
+    [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return fallback;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** rgba() string from a channel triple. */
+export function rgba(rgb: [number, number, number], alpha: number): string {
+  return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
+}
+
+export let theme: ThemeTokens = null as any; // populated by applyTheme at boot
+
+/** Stamp a palette row on the document, mirror it here, tell listeners.
+    Canvas layers (field, garden, FFT) subscribe to "theme". */
+export function applyTheme(id: string): void {
+  if (!THEMES.some((t) => t.id === id)) id = "blossom_dark";
+  document.documentElement.dataset.theme = id;
+  try { localStorage.setItem("eyeTheme", id); } catch { /* private mode */ }
+  theme = readTheme();
+  store.emit("theme");
+}
+
+/** Boot-time read (theme was already stamped pre-paint by index.html). */
+export function initTheme(): void {
+  theme = readTheme();
+}
+
 export const CAT_HUES: Record<string, [number, number]> = {
   // hue, base saturation — low chroma per PART 2; 4 canonical + live extras
   user_pref: [338, 45],
@@ -124,6 +245,9 @@ const FALLBACK_HUES: [number, number][] = [
   [180, 20], [60, 20], [300, 18], [110, 18],
 ];
 
+/** Category color, trust-saturated, tuned per light/dark room:
+    on dark grounds trust brightens the dot; on light grounds trust
+    deepens it — vivid always means trusted. */
 export function catColor(category: string, trust: number, alpha = 1): string {
   let hs = CAT_HUES[category];
   if (!hs) {
@@ -132,11 +256,16 @@ export function catColor(category: string, trust: number, alpha = 1): string {
     hs = FALLBACK_HUES[h];
   }
   const [hue, baseSat] = hs;
-  const sat = baseSat * (0.4 + trust * 0.6) / 0.7;
-  const lit = category === "tool" ? 72 * (0.55 + trust * 0.5)
-            : category === "general" ? 50 * (0.6 + trust * 0.6)
-            : 38 + trust * 34;
-  return `hsla(${hue}, ${sat}%, ${Math.min(lit, 80)}%, ${alpha})`;
+  const dark = theme?.dark ?? true;
+  const sat = baseSat * (0.4 + trust * 0.6) / 0.7 * (dark ? 1 : 1.25);
+  const lit = dark
+    ? (category === "tool" ? 72 * (0.55 + trust * 0.5)
+       : category === "general" ? 50 * (0.6 + trust * 0.6)
+       : 38 + trust * 34)
+    : (category === "tool" ? 52 - trust * 22
+       : category === "general" ? 55 - trust * 25
+       : 62 - trust * 28);
+  return `hsla(${hue}, ${sat}%, ${dark ? Math.min(lit, 80) : Math.max(lit, 22)}%, ${alpha})`;
 }
 
 export function fid(id: number): string {
