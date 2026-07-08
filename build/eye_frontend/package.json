@@ -1,6 +1,6 @@
 {
   "name": "holographic-eye-frontend",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "The Holographic Eye — TS canvas frontend (compiled from PLAN.md)",
   "license": "GPL-3.0-only",

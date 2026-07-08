@@ -50,14 +50,14 @@ hermes gateway restart
 
 ```bash
 # Debian / Ubuntu / Mint — or just double-click the .deb
-sudo apt install ./holographic-eye_1.0.2_amd64.deb
+sudo apt install ./holographic-eye_1.0.3_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install ./holographic-eye-1.0.2-1.x86_64.rpm
+sudo dnf install ./holographic-eye-1.0.3-1.x86_64.rpm
 
 # verify
-holographic-eye --version              # → holographic-eye 1.0.2
-curl -s http://127.0.0.1:8770/health   # → {"ok": true, ... "version": "1.0.2"}
+holographic-eye --version              # → holographic-eye 1.0.3
+curl -s http://127.0.0.1:8770/health   # → {"ok": true, ... "version": "1.0.3"}
 ```
 
 Built and installed on Linux Mint 22; the `.rpm` is `rpm --test`
