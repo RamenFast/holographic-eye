@@ -66,20 +66,29 @@ EDGE = (42, 46, 55)
 PINK = "Vaporwave"
 GOLD = "Solar Gold"
 BLUE = "Ice Blue"
+CYAN = "Cyan Tube"
+WHITE = "White"
 
 
 # ── the geometry (all closed curves, icon space [-1, 1], y up) ──────
 
+# the almond's lids are asymmetric (arched upper, shallow lower), so
+# the eye's VISUAL center sits above its geometric center — iris and
+# pupil must sit there or the eye gazes downward (Ben caught v2 doing
+# exactly that). aperture center = CY + (H_UP − H_LO) / 2.
+EYE_W, EYE_H_UP, EYE_H_LO, EYE_CY = 0.60, 0.36, 0.26, -0.02
+GAZE_CY = EYE_CY + (EYE_H_UP - EYE_H_LO) / 2.0   # where it looks at you
+
+
 def almond(n: int) -> np.ndarray:
     """Eye outline: arched upper lid, shallower lower lid, sharp
     corners at x = ±w. One continuous closed loop."""
-    w, h_up, h_lo, cy = 0.56, 0.33, 0.24, -0.02
     t = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
-    x = w * np.cos(t)
+    x = EYE_W * np.cos(t)
     y = np.where(np.sin(t) >= 0,
-                 h_up * np.sin(t) ** 1.0,
-                 h_lo * np.sin(t))
-    return np.stack([x, y + cy], axis=1)
+                 EYE_H_UP * np.sin(t) ** 1.0,
+                 EYE_H_LO * np.sin(t))
+    return np.stack([x, y + EYE_CY], axis=1)
 
 
 def circle(cx: float, cy: float, r: float, n: int) -> np.ndarray:
@@ -314,33 +323,44 @@ def main() -> None:
     pinks, golds = flower_ring(rng)
 
     # one closed figure per layer, grouped by beam theme so the scope
-    # switches phosphor three times, not thirteen
-    figures: list[tuple[str, str, np.ndarray]] = (
-        [("eye", BLUE, almond(2400)),
-         ("iris", BLUE, circle(0.0, -0.02, 0.215, 1600)),
-         ("pupil", BLUE, circle(0.0, -0.02, 0.085, 1000))]
-        + [(f"pink{i}", PINK, rose(cx, cy, s, 5, ph, 2000))
+    # switches phosphor five times, not eighteen. `weight` is a double-
+    # exposure count: the layer is screen-blended onto the plate that
+    # many times (Ben's "stitch multiple waveforms" ask) — the eye gets
+    # the extra passes so it out-glows the flowers and holds the gaze.
+    figures: list[tuple[str, str, np.ndarray, int]] = (
+        [("eye", BLUE, almond(2400), 2),
+         ("iris", BLUE, circle(0.0, GAZE_CY, 0.225, 1600), 2),
+         ("pupil", BLUE, circle(0.0, GAZE_CY, 0.095, 1000), 2),
+         # esoteric depth: a spectral inner ring + a hot white core —
+         # the catch-light that makes the eye meet the user's
+         ("iris2", CYAN, circle(0.0, GAZE_CY, 0.185, 1400), 1),
+         ("core", WHITE, circle(0.0, GAZE_CY, 0.045, 700), 2)]
+        + [(f"pink{i}", PINK, rose(cx, cy, s, 5, ph, 2000), 1)
            for i, (cx, cy, s, ph) in enumerate(pinks)]
-        + [(f"gold{i}", GOLD, rose(cx, cy, s, 2, ph, 1600))
+        + [(f"gold{i}", GOLD, rose(cx, cy, s, 2, ph, 1600), 1)
            for i, (cx, cy, s, ph) in enumerate(golds)]
     )
 
     with tempfile.TemporaryDirectory(prefix="eyeic-", dir="/tmp") as td:
         work = Path(td)
         scope = Scope(work)
-        snaps: list[Path] = []
+        snaps: list[tuple[Path, int]] = []
         try:
-            for name, theme, cycle in figures:
+            for name, theme, cycle, weight in figures:
                 wav = work / f"{name}.wav"
                 path_to_wav(cycle, wav)
-                snaps.append(scope.draw_layer(wav, theme))
+                snaps.append((scope.draw_layer(wav, theme), weight))
         finally:
             scope.close()
 
-        layers = [load_layer(p) for p in snaps]
+        layers = []
+        for p, weight in snaps:
+            lit = load_layer(p)
+            for _ in range(weight):
+                layers.append(lit)
         master = compose(layers)
         # keep Ben's Pictures folder clean — the snapshots were ours
-        for p in snaps:
+        for p, _w in snaps:
             try:
                 p.unlink()
             except OSError:

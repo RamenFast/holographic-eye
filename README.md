@@ -108,6 +108,33 @@ undoable. `WS /events?token=…` streams every journal event. Acceptance
 harnesses: `build/verify/p1_equivalence.py` + `p2_control.py` (run
 them with the hermes venv python; they copy the live DB, never touch it).
 
+## Multiple sessions & windows — is the database safe?
+
+Short answer: **yes, by construction.** How it works:
+
+- There is exactly **one provider instance**, and it lives *inside the
+  always-on gateway process*. Every chat session — Telegram, the
+  api_server, `/holo`, all of them at once — flows through that same
+  instance. The Eye isn't "active in one session"; it wraps the
+  memory itself, and journals every session's ops (each event carries
+  its `session_id`).
+- **Any number of Eye windows** (desktop app, browser tabs, another
+  machine over LAN) can watch simultaneously. Reads are stateless
+  passthroughs; mutations from any window execute inside that one
+  gateway process, through the provider's own store API, serialized
+  on its single connection — and each one lands in the journal with a
+  full before/after image, so anything can be undone (I3/I4).
+- Separate CLI processes (`hermes holographic-eye status`,
+  `hermes memory status`) open their **own** SQLite connections. Both
+  databases run in **WAL mode**, which exists precisely so multiple
+  processes can read while one writes — with busy timeouts, not
+  corruption. (These transient processes also never bind the control
+  plane port; only the gateway does.)
+- The **one forbidden move** is restoring a backup over a *live* WAL
+  database — which is why restore is documented as a cold operation
+  below. Nothing in normal use — however many sessions, windows, or
+  CLIs — can hurt `memory_store.db`.
+
 ## Backup & restore
 
 `backup` (GUI modal or CLI) snapshots `memory_store.db` +
