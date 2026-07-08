@@ -145,30 +145,37 @@ class Garden {
     this.vineL = document.querySelector<HTMLCanvasElement>(".vine-l")!;
     this.vineR = document.querySelector<HTMLCanvasElement>(".vine-r")!;
     this.cottage = document.querySelector<HTMLCanvasElement>(".cottage-c")!;
-    store.on("theme", () => this.grow());
+    // theme switch = same garden, new inks — repaint WITHOUT the bloom
+    // animation (re-blooming mid-switch is the glitch, see below)
+    store.on("theme", () => this.grow(false));
     const ro = new ResizeObserver(() => {
       clearTimeout(this.resizeTimer);
-      this.resizeTimer = window.setTimeout(() => this.grow(), 150);
+      this.resizeTimer = window.setTimeout(() => this.grow(false), 150);
     });
     ro.observe(this.bed);
     ro.observe(this.vineL);
-    this.grow();
+    this.grow(true);
   }
 
-  /** (Re)draw every layer from the session seed + active palette. */
-  grow(): void {
+  /** (Re)draw every layer from the session seed + active palette.
+      bloom=true plays the sprout animation (first paint / toggle-on). */
+  grow(bloom = false): void {
     if (document.body.classList.contains("no-garden")) return;
     const p = gardenPalette();
     this.drawBed(p);
     this.drawVine(this.vineL, p, this.seed ^ 0x1eaf);
     this.drawVine(this.vineR, p, this.seed ^ 0xb10b);
     this.drawCottage(p);
+    if (bloom) this.rebloom(this.bed);
   }
 
   private ctxFor(c: HTMLCanvasElement): [CanvasRenderingContext2D, number, number] {
-    const r = c.getBoundingClientRect();
-    const w = Math.max(1, Math.floor(r.width / PX));
-    const h = Math.max(1, Math.floor(r.height / PX));
+    // offsetWidth/Height, NEVER getBoundingClientRect: the bloom
+    // animation scales transform, and a rect measured mid-bloom sized
+    // the bed canvas 1px tall — the "flowers glitch on theme switch"
+    // bug (Ben, feedback r3). Layout boxes ignore transforms.
+    const w = Math.max(1, Math.floor(c.offsetWidth / PX));
+    const h = Math.max(1, Math.floor(c.offsetHeight / PX));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const ctx = c.getContext("2d")!;
     ctx.clearRect(0, 0, w, h);
@@ -196,7 +203,6 @@ class Garden {
       if (rng() < 0.35) grassTuft(put, rng, p, x + 2 + Math.floor(rng() * 3), ground);
       x += 5 + Math.floor(rng() * 14);
     }
-    this.rebloom(this.bed);
   }
 
   private drawVine(c: HTMLCanvasElement, p: Palette, seed: number): void {
@@ -222,7 +228,6 @@ class Garden {
         if (rng() < 0.5) put(bx + 1, by - 1, p.gold);
       }
     }
-    this.rebloom(c);
   }
 
   private drawCottage(p: Palette): void {
@@ -262,7 +267,7 @@ export function initGarden(): void {
 }
 
 /** Called when the ⚙ garden toggle flips back on (canvas was display:
-    none, so sizes were stale) or a theme lands before init. */
-export function regrowGarden(): void {
-  garden?.grow();
+    none, so sizes were stale) — that path blooms; plain repaints don't. */
+export function regrowGarden(bloom = false): void {
+  garden?.grow(bloom);
 }

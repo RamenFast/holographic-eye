@@ -488,8 +488,10 @@ export function openSettings(): void {
   back.querySelector<HTMLElement>("#st-manual")!.onclick = () => openHelp();
   back.querySelectorAll<HTMLElement>(".theme-chip").forEach((chip) => {
     chip.onclick = () => {
+      // applyTheme emits "theme" — the garden repaints through its own
+      // listener; a second explicit regrow here caused the double-draw
+      // that could land mid-bloom (feedback r3 glitch)
       applyTheme(chip.dataset.th!);
-      regrowGarden();
       back.querySelectorAll<HTMLElement>(".theme-chip").forEach((c) =>
         c.classList.toggle("active", c === chip));
     };
@@ -502,7 +504,9 @@ export function openSettings(): void {
     localStorage.setItem("eyeGarden",
       (e.target as HTMLInputElement).checked ? "on" : "off");
     applyUiPrefs();
-    regrowGarden(); // canvases were display:none while off — sizes stale
+    // canvases were display:none while off (sizes stale) — regrow, and
+    // let it bloom: toggling the garden back on deserves the sprout
+    regrowGarden(true);
   };
   back.querySelector<HTMLElement>("#st-refit")!.onclick = async () => {
     await (window as any).eyeRefit();
