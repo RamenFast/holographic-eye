@@ -1,88 +1,90 @@
-# HANDOFF — The Holographic Eye (as of 2026-07-03, end of session 2)
+# HANDOFF — The Holographic Eye (as of 2026-07-07, v1.0.0 shipped)
 
 For the next session (any agent, or Ben). Source of truth is **PLAN.md**;
 this file is the "where we are + what's next" pointer. Read PLAN's
-"Status: BUILT & LIVE" header + PART 7 decision log (D-0001…D-0010).
+status header + PART 7 decision log (D-0001…D-0014).
 
 ## Current state (all live on Ben's machine)
 
 | Thing | State |
 |---|---|
-| Wrapper provider | `memory.provider: holographic-eye`, live in the gateway since 2026-07-02; journal capturing everything (`~/.hermes/eye_journal.db`) |
-| Control plane | `http://127.0.0.1:8770`, token `~/.hermes/eye_token`, serves the GUI. **Starts lazily on first agent message** — after a gateway restart, ping via api_server (:8642, key in `~/.hermes/.env`) if it's not listening |
-| GUI | v3 deployed 2026-07-03: feedback round 2 fully applied (D-0010) — dirty-flag rendering (0 idle draws, was 60fps forever), multi-entity highlight set, chevron disclosure, lens toggle fix, one manual + honest ⚙ (text size, pixel-garden toggle), 6-species flowerbed + cottage |
-| CLI / chat | `hermes holographic-eye status\|tail\|undo-last\|backup\|gui` · `/holo` on Telegram/CLI |
-| Backups | D-0007; first backup on Mass storage; restore is cold-only (README) |
-| api_server | enabled via `API_SERVER_KEY` in `~/.hermes/.env` (loopback :8642); asks land in the `eye-console` session |
-| Acceptance | `build/verify/p1_equivalence.py` (15 checks) + `p2_control.py` (25 checks) — both ALL-PASS as of 2026-07-03. GUI affordances Playwright-verified against the live control plane (headless system Chrome + a `clearRect` draw counter) |
+| Release | **v1.0.0** on GitHub (master, tag `v1.0.0`): .deb + .rpm + source tarball + SHA256SUMS. The .deb is installed locally (`holographic-eye --version` → 1.0.0). Release law: every commit landing on master IS a release and gets rebuilt. Branches: master only on GitHub; `dev` is the one local testing branch. |
+| Wrapper provider | `memory.provider: holographic-eye`, live in the gateway; journal capturing everything (`~/.hermes/eye_journal.db`) |
+| Probe latency | **FIXED** (D-0012): 4.18 s → 0.04 s warm. `accel.py` memoizes the bundled encoders at runtime (zero upstream diffs, byte-identical — harness-proven). /stats shows cache telemetry. Kill-switch: `plugins.holographic-eye.accel: false`. |
+| Control plane | `http://127.0.0.1:8770`, token `~/.hermes/eye_token`. **Auto policy now binds only inside `hermes gateway run`** (D-0012 port-theft fix — a lingering `hermes dashboard` once held the port across an upgrade). Starts lazily on first agent message; wake via api_server (:8642, key in `~/.hermes/.env`). |
+| GUI | v4 chrome (D-0011): 10 palette rows, Blossom Dark default, v3 look = "Blossom AMOLED" chip. Procedural garden in its own lane + behind the Field (D-0013). Break-tested: 31 Playwright checks ALL-PASS, 0 idle draws, zero console errors. |
+| Icon | Drawn by the Phosphor engine (D-0014) — regenerate with `python3 build/eye_icons/make_icons.py` (needs phosphor ≥ 4.6 on PATH; silent, isolated instance). |
+| CLI / chat | `hermes holographic-eye status|tail|undo-last|backup|gui` · `/holo` |
+| Acceptance | `build/verify/p1_equivalence.py` + `p2_control.py` — ALL-PASS 2026-07-07 with accel installed. GUI: scratchpad Playwright suite (patterns worth re-creating; uses playwright-core + headless Thorium). |
 
-## Next session, in order
+## Next session candidates
 
-1. **Probe latency (top candidate)** — the *inner* provider's `probe()` takes
-   ~4s per call on 518 facts: it re-runs `hrr.encode_text(fact.content)` for
-   every fact on every probe
-   (`~/.hermes/hermes-agent/plugins/memory/holographic/retrieval.py`, the
-   loop at the bottom of `probe()`; `role_content` is even re-encoded inside
-   the loop). A content-vector cache keyed by `(fact_id, updated_at)` — or
-   persisting content vectors — would make entity clicks ~ms. **That's
-   upstream hermes-agent code, not the wrapper**: decide whether to patch
-   upstream locally (gateway restart + re-run verify harnesses) or file the
-   deferred upstream PR. The GUI already narrates the wait honestly
-   (mathlog "running…" line), so this is pure speed, not correctness.
-2. Wait for Ben's feedback round 3; log it in `feedback/` with root causes
-   the same way.
-3. Fold anything new back into PLAN.md (D-0011…) — the discipline held for
-   two sessions; keep it.
+1. Ben's feedback round 3 on the v1.0.0 chrome/themes/garden — log in
+   `docs/dev/feedback/`, fold back as D-0015+.
+2. Entity Desk curation session (the junk entities are still Ben's
+   call — machinery verified).
+3. Q5 quarantine / UMAP opt-in — still deliberately deferred.
+4. If a release is cut: follow the release flow below, verbatim.
 
-Deferred (unchanged): Q5 quarantine mode; junk-entity merging is Ben's call
-via the Entity Desk; UMAP opt-in; upstream PR grooming.
+## Release flow (the law, mirrored from sysmon)
+
+```
+work on dev → bump versions (tauri.conf.json + Cargo.toml +
+  eye_provider/__init__.py __version__ + frontend package.json) →
+build frontend (npm run build) + deploy.sh + gateway restart if
+  server-side changed → re-run p1+p2 → break-test →
+cargo tauri build --bundles deb,rpm →
+sudoplz sudo apt install -y --reinstall ./holographic-eye_X.Y.Z_amd64.deb →
+merge --no-ff to master → tag vX.Y.Z → git archive source tarball →
+sha256sum * > SHA256SUMS → gh release create vX.Y.Z <assets>
+  --notes-file <notes.md> → fresh screenshots into docs/ →
+update this HANDOFF + PLAN status header.
+```
 
 ## Gotchas that will bite you (learned the hard way)
 
-- Discovery calls the provider's `register()` on every scan → constructor
-  must stay cheap/side-effect-free.
-- **Provider (and thus control plane) initializes lazily** — after a gateway
-  restart, :8770 is down until the first agent message. A one-line chat via
-  api_server wakes it (see above).
-- CLI processes skip the control plane on purpose (port-theft; see PLAN
-  Addendum 2 + `control_plane` config).
-- `hermes memory status`-style tools construct throwaway provider
-  instances — journal is multi-connection-safe (WAL) by design.
-- The api_server `/api/sessions` list only shows API-created sessions —
-  Telegram sessions won't appear in the ask-modal selector; the
-  `eye-console` default is the reliable target.
-- Frontend build: `cd build/eye_frontend && npm run build` (esbuild),
-  then `./build/deploy.sh`. Typecheck with `npx tsc --noEmit` — keep it clean.
-  Frontend-only changes do NOT need a gateway restart (static files are read
-  per request); server-side `*.py` changes DO (the plugin loader pre-imports
-  all plugin submodules).
-- **Render discipline is dirty-flag now** (D-0010): if you add anything the
-  canvas must react to, either emit a store topic the Field subscribes to
-  (`facts`/`selection`/`entities`/`trustlens`/`halo`) or call
+- **Port-theft**: only the gateway may own :8770. If /stats looks
+  stale after a deploy, check `ss -tlnp | grep 8770` — a pre-fix
+  dashboard/CLI process may still hold it; restart that service.
+- Provider (and control plane) initializes lazily — after a gateway
+  restart, :8770 is down until the first agent message (one-line chat
+  via api_server wakes it).
+- Server-side `*.py` changes need a gateway restart (loader pre-imports
+  all plugin submodules); frontend-only changes do NOT.
+- Frontend build: `cd build/eye_frontend && npm run build`, then
+  `./build/deploy.sh`. Typecheck with `npx tsc --noEmit` — keep clean.
+- Render discipline is dirty-flag: new canvas-reactive state must emit
+  a store topic the Field subscribes to (now incl. `theme`) or call
   `field.requestDraw()`. Never reintroduce an unconditional rAF loop.
-- All CSS font sizes are rem (13px = 1rem at the html root) so the ⚙ text-size
-  setting works — don't add new `font-size: Npx` rules.
-- Journal is `synchronous=NORMAL` — do not "fix" that back to FULL;
-  it's a measured 2.5ms→0.1ms win and the loss mode is acceptable
-  (see D-0008 item 10).
+- All CSS font sizes are rem (13px = 1rem); no new `font-size: Npx`.
+- **Themes are token rows**: new UI reads CSS custom properties (and
+  canvas code reads the `theme` bridge in state.ts). Never hardcode a
+  color — that's the D-0011 law. New theme = one CSS block + one
+  THEMES row (+ preview swatch) in state.ts.
+- Garden: decoration must stay in the lane or behind the data canvas
+  (D-0013). Flowers over UI = regression.
+- Journal is `synchronous=NORMAL` — do not "fix" back to FULL (D-0008
+  #10). `retrieval_counts()` is incremental — it relies on the journal
+  being append-only with immutable responses; never UPDATE a response.
+- The icon generator drives a private phosphor via WAVs; keep figures
+  CLOSED and one figure per snapshot (a scope has no pen-up).
+- Discovery calls `register()` on every scan → constructor stays cheap.
 
 ## Repo layout
 
 ```
-PLAN.md          ← the source (vision 🫀 + spec 🧠 + decisions), fold-back mandatory
+PLAN.md          ← the source (vision 🫀 + spec 🧠 + decisions D-0001…D-0014)
 HANDOFF.md       ← this file
-README.md        ← daily use + recompile + restore
-feedback/        ← Ben's feedback rounds, screenshots, root-cause tables
-mockup.html      ← P0 rendered mockup (design tokens proving ground)
+README.md        ← concise, humans + agents; honest ledger
+docs/            ← release screenshots · docs/dev/ (mockup, feedback rounds, release notes)
 build/
-  eye_provider/  ← wrapper+journal+control plane (Python) → ~/.hermes/plugins/holographic-eye/
-  eye_frontend/  ← TS canvas GUI → served by control plane (+ Tauri)
+  eye_provider/  ← wrapper+journal+control plane+accel (Python) → ~/.hermes/plugins/holographic-eye/
+  eye_frontend/  ← TS canvas GUI (palette rows, garden) → served by control plane (+ Tauri)
   eye_commands/  ← /holo companion plugin
-  eye_shell/     ← Tauri shell (.deb via `cargo tauri build --bundles deb`)
-  eye_icons/     ← Blossom-language icon generator (make_icons.py)
-  verify/        ← acceptance harnesses (run them; they're fast)
-  deploy.sh      ← rsync deploy of provider+frontend+commands
+  eye_shell/     ← Tauri shell → .deb + .rpm (cargo tauri build --bundles deb,rpm)
+  eye_icons/     ← make_icons.py — the Phosphor-drawn icon pipeline
+  verify/        ← acceptance harnesses (fast; run with the hermes venv python)
 ```
 
-Everything in `build/` is regenerable from PLAN.md — if the tree and the
-PLAN ever disagree, the PLAN wins and the code recompiles.
+Everything in `build/` is regenerable from PLAN.md — if the tree and
+the PLAN ever disagree, the PLAN wins and the code recompiles.

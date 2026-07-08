@@ -26,6 +26,11 @@ fn eye_url() -> String {
 }
 
 fn main() {
+    // version law: package version == --version output == filename == tag
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("holographic-eye {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     tauri::Builder::default()
         .setup(|app| {
             let url: tauri::Url = eye_url().parse().expect("static url");
