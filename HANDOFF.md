@@ -1,4 +1,4 @@
-# HANDOFF — The Holographic Eye (as of 2026-07-08, v1.0.2)
+# HANDOFF — The Holographic Eye (as of 2026-07-08, v1.0.3)
 
 For the next session (any agent, or Ben). Source of truth is **PLAN.md**;
 this file is the "where we are + what's next" pointer. Read PLAN's
@@ -8,7 +8,7 @@ status header + PART 7 decision log (D-0001…D-0014).
 
 | Thing | State |
 |---|---|
-| Release | **v1.0.2 SHIPPED 2026-07-08** — [GitHub release](https://github.com/RamenFast/holographic-eye/releases/tag/v1.0.2) (tag `v1.0.2` on master): .deb + .rpm + source tarball + SHA256SUMS. Installed locally (`holographic-eye --version` → 1.0.2); provider deployed + gateway restarted + boot-warm verified live. Release law: every commit landing on master IS a release and gets rebuilt. Branches: master + `dev` (the one local testing branch, currently = master + this doc update). |
+| Release | **v1.0.3 SHIPPED 2026-07-08** — GitHub release (tag `v1.0.3` on master): .deb + .rpm + source tarball + SHA256SUMS. Installed locally (`holographic-eye --version` → 1.0.3); provider deployed + gateway restarted + boot-warm verified live. (v1.0.3 = select-legibility fix; v1.0.2 = D-0015 boot-warm.) Release law: every commit landing on master IS a release and gets rebuilt. Branches: master + `dev` (the one local testing branch). |
 | Wrapper provider | `memory.provider: holographic-eye`, live in the gateway; journal capturing everything (`~/.hermes/eye_journal.db`) |
 | Probe latency | **FIXED** (D-0012): 4.18 s → 0.04 s warm. `accel.py` memoizes the bundled encoders at runtime (zero upstream diffs, byte-identical — harness-proven). /stats shows cache telemetry. Kill-switch: `plugins.holographic-eye.accel: false`. |
 | Control plane | `http://127.0.0.1:8770`, token `~/.hermes/eye_token`. Binds only inside `hermes gateway run` (D-0012 port-theft fix). **Now boot-warms at gateway start (D-0015)** — a dedicated provider brings :8770 up ~1 s after boot, no agent message needed; triggered by the `/holo` companion (loaded at boot) force-loading the lazily-loaded exclusive provider. Manual wake (older path, still works): an api_server :8642 message. |
@@ -70,6 +70,13 @@ update this HANDOFF + PLAN status header.
   canvas code reads the `theme` bridge in state.ts). Never hardcode a
   color — that's the D-0011 law. New theme = one CSS block + one
   THEMES row (+ preview swatch) in state.ts.
+- **Native form controls ignore the tokens under WebKitGTK** (v1.0.3):
+  a `<select>` renders with the GTK widget skin — faint text on a light
+  box — unless it gets `appearance: none` (then the `--ink-*` tokens
+  apply). Any new `<select>` needs the base `select` rule's caret +
+  right-padding room (see `.st-row select` / `.ask-target select`), and
+  `option { }` for the popup. Verify dropdowns in the actual Tauri app,
+  not just a Chromium browser — the two render selects differently.
 - Garden: decoration must stay in the lane or behind the data canvas
   (D-0013). Flowers over UI = regression.
 - Journal is `synchronous=NORMAL` — do not "fix" back to FULL (D-0008

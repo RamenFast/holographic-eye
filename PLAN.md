@@ -40,6 +40,12 @@ staying dormant until the first in-gateway message. This repairs a regression
 from Hermes moving TUI turns into `slash_worker` subprocesses, where the old
 lazy per-session start never fired in the gateway.
 
+**v1.0.3 SHIPPED 2026-07-08** — legibility fix: native `<select>` dropdowns
+(text size, ask-target) rendered with the WebKitGTK GTK skin — faint text that
+ignored the theme tokens. `appearance: none` + a themed caret + option theming
+so the dropdowns read like the rest of the panel in every room (extends the
+D-0011 token law to native form controls).
+
 **→ Next session: start from `HANDOFF.md`.**
 
 **Open threads for a future session:**

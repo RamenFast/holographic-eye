@@ -34,7 +34,7 @@ from .journal import EyeJournal
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 _MUTATING_FACT_ACTIONS = {"add", "update", "remove"}
 _READ_FACT_ACTIONS = {"search", "probe", "related", "reason", "contradict", "list"}
