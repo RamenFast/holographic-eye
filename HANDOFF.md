@@ -1,4 +1,4 @@
-# HANDOFF — The Holographic Eye (as of 2026-07-07, v1.0.0 shipped)
+# HANDOFF — The Holographic Eye (as of 2026-07-08, v1.0.2)
 
 For the next session (any agent, or Ben). Source of truth is **PLAN.md**;
 this file is the "where we are + what's next" pointer. Read PLAN's
@@ -8,14 +8,14 @@ status header + PART 7 decision log (D-0001…D-0014).
 
 | Thing | State |
 |---|---|
-| Release | **v1.0.0** on GitHub (master, tag `v1.0.0`): .deb + .rpm + source tarball + SHA256SUMS. The .deb is installed locally (`holographic-eye --version` → 1.0.0). Release law: every commit landing on master IS a release and gets rebuilt. Branches: master only on GitHub; `dev` is the one local testing branch. |
+| Release | **v1.0.2** built + deployed locally on `dev` (`holographic-eye --version` → 1.0.2; provider deployed + gateway restarted; .deb + .rpm rebuilt). **GitHub release + master merge PENDING Ben's push approval** (§4 gate). Last on GitHub: **v1.0.0** (tag `v1.0.0`). Release law: every commit landing on master IS a release and gets rebuilt. Branches: master only on GitHub; `dev` is the one local testing branch. |
 | Wrapper provider | `memory.provider: holographic-eye`, live in the gateway; journal capturing everything (`~/.hermes/eye_journal.db`) |
 | Probe latency | **FIXED** (D-0012): 4.18 s → 0.04 s warm. `accel.py` memoizes the bundled encoders at runtime (zero upstream diffs, byte-identical — harness-proven). /stats shows cache telemetry. Kill-switch: `plugins.holographic-eye.accel: false`. |
-| Control plane | `http://127.0.0.1:8770`, token `~/.hermes/eye_token`. **Auto policy now binds only inside `hermes gateway run`** (D-0012 port-theft fix — a lingering `hermes dashboard` once held the port across an upgrade). Starts lazily on first agent message; wake via api_server (:8642, key in `~/.hermes/.env`). |
+| Control plane | `http://127.0.0.1:8770`, token `~/.hermes/eye_token`. Binds only inside `hermes gateway run` (D-0012 port-theft fix). **Now boot-warms at gateway start (D-0015)** — a dedicated provider brings :8770 up ~1 s after boot, no agent message needed; triggered by the `/holo` companion (loaded at boot) force-loading the lazily-loaded exclusive provider. Manual wake (older path, still works): an api_server :8642 message. |
 | GUI | v4 chrome (D-0011): 10 palette rows, Blossom Dark default, v3 look = "Blossom AMOLED" chip. Procedural garden in its own lane + behind the Field (D-0013). Break-tested: 31 Playwright checks ALL-PASS, 0 idle draws, zero console errors. |
 | Icon | Drawn by the Phosphor engine (D-0014) — regenerate with `python3 build/eye_icons/make_icons.py` (needs phosphor ≥ 4.6 on PATH; silent, isolated instance). |
 | CLI / chat | `hermes holographic-eye status|tail|undo-last|backup|gui` · `/holo` |
-| Acceptance | `build/verify/p1_equivalence.py` + `p2_control.py` — ALL-PASS 2026-07-07 with accel installed. GUI: scratchpad Playwright suite (patterns worth re-creating; uses playwright-core + headless Thorium). |
+| Acceptance | `build/verify/p1_equivalence.py` + `p2_control.py` + `test_bootwarm.py` (D-0015) — ALL-PASS 2026-07-08 with accel installed. GUI: scratchpad Playwright suite (patterns worth re-creating; uses playwright-core + headless Thorium). |
 
 ## Next session candidates
 
@@ -46,9 +46,18 @@ update this HANDOFF + PLAN status header.
 - **Port-theft**: only the gateway may own :8770. If /stats looks
   stale after a deploy, check `ss -tlnp | grep 8770` — a pre-fix
   dashboard/CLI process may still hold it; restart that service.
-- Provider (and control plane) initializes lazily — after a gateway
-  restart, :8770 is down until the first agent message (one-line chat
-  via api_server wakes it).
+- Control plane now **boot-warms** (D-0015): after a gateway restart
+  :8770 comes up on its own in ~1 s, no message needed. The trigger
+  chain is indirect — the wrapper is an *exclusive* memory plugin
+  (loaded lazily, NOT at boot), so the `/holo` companion plugin
+  (`eye_commands`, loaded at boot) force-loads it in the gateway, whose
+  `register()` starts a dedicated boot provider. If :8770 is dark after
+  a restart: check `~/.hermes/logs/agent.log` for `eye-commands-bootwarm`
+  / "boot-warmed", confirm the gateway argv has the token `gateway`, and
+  that `/holo` is still deployed. Manual fallback wake: an api_server
+  :8642 message. **Why it existed:** Hermes moved TUI turns into
+  `tui_gateway.slash_worker` subprocesses where the old lazy
+  per-session start never fired in the gateway.
 - Server-side `*.py` changes need a gateway restart (loader pre-imports
   all plugin submodules); frontend-only changes do NOT.
 - Frontend build: `cd build/eye_frontend && npm run build`, then

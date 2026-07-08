@@ -31,7 +31,8 @@ The stream at the foot is the journal, live. The flowers are flowers.
 2. The wrapper provider deployed and selected — see *Install the
    provider* below.
 3. The gateway **booted** (`hermes gateway start`). The control plane
-   at `127.0.0.1:8770` wakes lazily on the first agent message.
+   at `127.0.0.1:8770` boot-warms with it — up ~1 s after the gateway,
+   no agent message needed (v1.0.2, D-0015).
 
 ## Install
 
@@ -49,14 +50,14 @@ hermes gateway restart
 
 ```bash
 # Debian / Ubuntu / Mint — or just double-click the .deb
-sudo apt install ./holographic-eye_1.0.0_amd64.deb
+sudo apt install ./holographic-eye_1.0.2_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install ./holographic-eye-1.0.0-1.x86_64.rpm
+sudo dnf install ./holographic-eye-1.0.2-1.x86_64.rpm
 
 # verify
-holographic-eye --version              # → holographic-eye 1.0.0
-curl -s http://127.0.0.1:8770/health   # → {"ok": true, ... "version": "1.0.0"}
+holographic-eye --version              # → holographic-eye 1.0.2
+curl -s http://127.0.0.1:8770/health   # → {"ok": true, ... "version": "1.0.2"}
 ```
 
 Built and installed on Linux Mint 22; the `.rpm` is `rpm --test`

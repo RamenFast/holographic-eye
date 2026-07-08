@@ -34,6 +34,12 @@ app icon drawn by the Phosphor engine itself (D-0014), first GitHub
 release with .deb + .rpm + source + checksums. Release law adopted:
 every commit landing on master IS a release and gets rebuilt.
 
+**v1.0.2 SHIPPED 2026-07-08** — the control plane now **boot-warms at gateway
+start** (D-0015), so the desktop app connects after every restart instead of
+staying dormant until the first in-gateway message. This repairs a regression
+from Hermes moving TUI turns into `slash_worker` subprocesses, where the old
+lazy per-session start never fired in the gateway.
+
 **→ Next session: start from `HANDOFF.md`.**
 
 **Open threads for a future session:**
@@ -1497,6 +1503,60 @@ near-black plate; small sizes get an energy boost. One figure per
 snapshot is the law: a scope has no pen-up, and the draft's
 between-figure jumps drew a bright chord polygon. Outputs feed
 hicolor, the Tauri bundle set, and the GUI favicon.
+
+---
+
+## D-0015 — Control plane boot-warms at gateway start (survives TUI slash_worker turn-routing) (2026-07-08)
+
+- Status: **applied + shipped v1.0.2** (Ben: "fix the behavior so it doesn't
+  go dormant on every gateway restart from the TUI. Bump sounds good").
+
+### Symptom
+After a gateway restart the desktop app showed only its connect error. :8770
+was down — yet memory worked and the journal was live. Nothing errored; there
+was simply no "Eye control plane listening" line.
+
+### Root cause
+The plane starts lazily, only inside the process where `_is_gateway_process()`
+is true (the exact `sys.argv` token `gateway`, i.e. `hermes gateway run`), on
+the first memory `initialize()`. A ~2026-07-08 Hermes update moved TUI/slash
+agent turns into `tui_gateway.slash_worker` subprocesses. Those DO call
+`initialize()` (journal source `tui`), but in a process where the heuristic is
+False → the `skip_cp` branch runs → the plane never binds. And the wrapper is
+an *exclusive* memory plugin, loaded lazily by the memory subsystem, so nothing
+in it runs at gateway boot either. Net: :8770 stayed dark until an in-gateway
+(api_server/Telegram) message happened to arrive — which, under a TUI-only
+workflow, can be never. (Distinct from the D-0012 port-theft `[Errno 98]`: that
+is a bind *collision*; this is pure dormancy — no error at all.)
+
+### Decision — eager boot-warm, decoupled from per-session initialize
+1. **Dedicated boot provider** (`__init__._boot_warm_control_plane`): in the
+   gateway process, warm a private `EyeMemoryProvider` on a daemon thread and
+   start the plane on it, so :8770 is live from process start regardless of
+   where sessions run. Retries the bind a few times so a socket lingering from
+   the outgoing gateway across a restart self-heals (the D-0012 Errno 98).
+2. **The plane keeps it as a persistent fallback** (`control.attach_boot` +
+   `active_provider()`): reads resolve to the live per-session provider when one
+   is attached, else the boot provider. A session attaching then detaching can
+   never leave the plane dark. Both read the same WAL DBs, so a fallback read is
+   byte-identical to a live-session read. (p2 unchanged: normal attach wins when
+   present.)
+3. **Triggered at boot via the `/holo` companion** (`eye_commands`): the
+   exclusive provider is not loaded at boot, but the standalone `/holo` plugin
+   is. In the gateway only, it force-loads the provider
+   (`load_memory_provider("holographic-eye")`) off-thread after the boot scan
+   settles, whose `register()` runs the boot-warm. `eye_commands` still avoids
+   the memory-provider heuristic tokens (PLAN PART 3 Addendum 2).
+
+### Verified
+- `build/verify/test_bootwarm.py` (isolated, test port, DB copy): boot attach
+  serves 541 facts as fallback; a live session attaches over it then detaches →
+  plane falls back, /health stays `attached`, /stats keeps serving.
+  `_is_gateway_process()` True for `gateway`, False for `slash_worker`.
+- p1 + p2 ALL-PASS with the `active_provider()` refactor.
+- Live: gateway restart → :8770 self-starts in ~1 s, no agent message; journal
+  shows `initialize · gateway-boot`; the installed app connects. Kill-switches
+  unchanged (`accel: false`, `control_plane: never`).
 
 ---
 

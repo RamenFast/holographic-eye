@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -67,9 +69,46 @@ def _holo(raw_args: str) -> str:
     return "\n".join(lines)
 
 
+def _is_gateway_process() -> bool:
+    """True only in the always-on gateway (`hermes gateway run`) — the one
+    process that should own the Eye's control-plane port."""
+    import sys
+    try:
+        return "gateway" in [a.lower() for a in sys.argv]
+    except Exception:
+        return False
+
+
+def _boot_warm_eye() -> None:
+    """Wake the Eye's control plane at gateway boot (D-0015).
+
+    The Eye's wrapper is an *exclusive* memory plugin, which the memory
+    subsystem loads lazily (first use) — so nothing in it runs at gateway
+    boot, and :8770 stays dark until the first in-gateway agent message.
+    Since the TUI moved turns into ``slash_worker`` subprocesses, that
+    message may never arrive in the gateway, leaving the desktop app unable
+    to connect after every restart. This companion IS loaded at boot; in
+    the gateway it triggers that lazy load now (off-thread, after the boot
+    plugin scan settles), whose ``register()`` boot-warms the plane. Never
+    affects /holo — a failure here just restores the old lazy behavior."""
+    if not _is_gateway_process():
+        return
+
+    def _go() -> None:
+        time.sleep(2.0)  # let the boot-time plugin/module scan finish first
+        try:
+            from plugins.memory import load_memory_provider
+            load_memory_provider("holographic-eye")
+        except Exception:
+            pass
+
+    threading.Thread(target=_go, name="eye-commands-bootwarm", daemon=True).start()
+
+
 def register(ctx) -> None:
     ctx.register_command(
         "holo", _holo,
         description="The Holographic Eye: memory status + recent journal events",
         args_hint="[n]",
     )
+    _boot_warm_eye()
