@@ -5,46 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Holographic Eye</title>
 <script>
-/* stamp the persisted theme before first paint (no flash of the
-   default room); the full theme bridge lives in the bundle */
 try {
-  document.documentElement.dataset.theme =
-    localStorage.getItem("eyeTheme") || "blossom_dark";
-} catch (e) { document.documentElement.dataset.theme = "blossom_dark"; }
+  document.documentElement.dataset.theme = localStorage.getItem("eyeTheme") || "blossom_dark";
+  document.documentElement.dataset.stream = localStorage.getItem("eyeStreamExpanded") === "true"
+    ? "expanded" : "collapsed";
+} catch (e) {
+  document.documentElement.dataset.theme = "blossom_dark";
+  document.documentElement.dataset.stream = "collapsed";
+}
 </script>
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="favicon.png">
 </head>
 <body>
 <div class="app">
-  <div class="statusbar">
-    <span class="glyph-eye pulsing" id="sb-glyph">⊙</span>
+  <header class="statusbar">
+    <span class="glyph-eye pulsing" id="sb-glyph" aria-hidden="true">⊙</span>
     <span class="appname">The Holographic Eye</span>
-    <span class="live-dot off" id="sb-live"></span><span id="sb-livelabel">connecting</span>
-    <span class="metrics" id="sb-metrics">attaching…</span>
-    <span class="sb-right">
-      <span id="sb-ask" title="compose a request over selected facts">ask agent</span>
-      <span id="sb-workbench" title="⌘R">reason</span>
-      <span id="sb-backup" title="backup memory">backup</span>
-      <span id="sb-settings" title="settings · theme · text size">⚙</span>
-      <span id="sb-help" title="manual (?)">?</span>
+    <span class="connection" role="status" aria-live="polite">
+      <span class="live-dot off" id="sb-live" aria-hidden="true"></span><span id="sb-livelabel">connecting</span>
     </span>
-  </div>
-  <div class="main">
-    <div class="pane" id="pane-left"></div>
-    <div class="field-wrap" id="field-wrap">
-      <canvas class="vine vine-l"></canvas>
-      <canvas class="vine vine-r"></canvas>
-      <canvas class="cottage-c"></canvas>
+    <span class="metrics" id="sb-metrics">attaching…</span>
+    <nav class="sb-right" aria-label="Application actions">
+      <button type="button" class="header-action" id="sb-ask" title="Compose a request over selected facts">ask agent</button>
+      <button type="button" class="header-action" id="sb-workbench" title="Open Reason · Ctrl+R">reason</button>
+      <button type="button" class="header-action" id="sb-backup" title="Backup memory">backup</button>
+      <button type="button" class="header-action" id="sb-settings" title="Settings · theme · text size">settings</button>
+      <button type="button" class="header-action" id="sb-help" title="Open manual · ?">manual</button>
+    </nav>
+  </header>
+  <main class="main">
+    <aside class="pane" id="pane-left" aria-label="Evidence bench"></aside>
+    <section class="field-wrap" id="field-wrap" aria-label="The Field">
+      <canvas class="vine vine-l" aria-hidden="true"></canvas>
+      <canvas class="vine vine-r" aria-hidden="true"></canvas>
+      <canvas class="cottage-c" aria-hidden="true"></canvas>
       <div class="field-title">T H E&nbsp;&nbsp;F I E L D</div>
-      <canvas class="fieldc"></canvas>
+      <nav class="context-rail" id="context-rail" aria-label="Active Field context" hidden></nav>
+      <canvas class="fieldc" aria-label="Fact projection"></canvas>
       <div class="tooltip" style="display:none"></div>
       <pre class="mathlog"></pre>
-    </div>
-    <div class="pane" id="pane-inspect"></div>
-  </div>
-  <div class="stream" id="stream"></div>
-  <div class="garden"><canvas></canvas></div>
+      <section class="boot-error" id="boot-error" role="alert" hidden>
+        <h1>The Eye could not attach</h1>
+        <p id="boot-error-message"></p>
+        <button type="button" class="btn commit" id="boot-retry">Retry</button>
+      </section>
+    </section>
+    <aside class="pane inspect-pane" id="pane-inspect" aria-label="Inspect"></aside>
+  </main>
+  <section class="stream-dock" id="stream-dock" aria-label="Memory stream">
+    <button type="button" class="stream-toggle" id="stream-toggle" aria-expanded="false" aria-controls="stream">
+      <span>STREAM</span><span class="stream-glance" id="stream-glance">waiting for journal events</span><span class="stream-toggle-state">expand</span><b aria-hidden="true">⌃</b>
+    </button>
+    <div class="stream" id="stream" role="log" aria-label="Journal events"></div>
+  </section>
+  <div class="garden" aria-hidden="true"><canvas></canvas></div>
 </div>
 <script src="bundle.js"></script>
 </body>

@@ -52,8 +52,11 @@ class Store {
   stats: any = {};
   wsStatus: "live" | "degraded" | "off" = "off";
 
-  selection = new Set<number>();     // selected fact_ids
+  selection = new Set<number>();     // selected fact_ids, insertion order is meaningful
   focusedFact: number | null = null; // the fact in the Inspect pane
+  private selectionHistory: { ids: number[]; focused: number | null }[] = [];
+  private selectionHistoryIndex = -1;
+  private restoringSelection = false;
   // entity highlight is a real set (r2 #3): every clicked entity stacks;
   // entityHighlight is the union of all per-entity hits, esc clears all
   entityHighlight = new Set<number>();
@@ -65,6 +68,7 @@ class Store {
   reasonHalo: { entities: string[]; factIds: Set<number> } | null = null;
 
   private listeners = new Map<string, Set<Listener>>();
+  private eventIds = new Set<number>();
 
   on(topic: string, fn: Listener): void {
     if (!this.listeners.has(topic)) this.listeners.set(topic, new Set());
@@ -82,10 +86,10 @@ class Store {
     this.emit("facts");
   }
 
-  pushEvent(ev: EyeEvent): void {
+  private trackEvent(ev: EyeEvent): boolean {
+    if (this.eventIds.has(ev.event_id)) return false;
     this.events.push(ev);
-    if (this.events.length > 400) this.events.splice(0, this.events.length - 400);
-    // track "probed recently" entity state for the Entities pane monograms
+    this.eventIds.add(ev.event_id);
     try {
       const req = ev.request ? JSON.parse(ev.request) : {};
       const names: string[] = [];
@@ -93,13 +97,53 @@ class Store {
       if (Array.isArray(req.entities)) names.push(...req.entities.map(String));
       for (const n of names) this.probedRecently.set(n.toLowerCase(), Date.now());
     } catch { /* not JSON */ }
+    return true;
+  }
+
+  private trimEvents(): void {
+    if (this.events.length <= 400) return;
+    const removed = this.events.splice(0, this.events.length - 400);
+    for (const ev of removed) this.eventIds.delete(ev.event_id);
+  }
+
+  pushEvent(ev: EyeEvent): void {
+    if (!this.trackEvent(ev)) return;
+    this.trimEvents();
     this.emit("events");
+  }
+
+  pushEvents(events: EyeEvent[]): void {
+    let changed = false;
+    for (const ev of events) changed = this.trackEvent(ev) || changed;
+    if (!changed) return;
+    this.events.sort((a, b) => a.event_id - b.event_id);
+    this.trimEvents();
+    this.emit("events");
+  }
+
+  private sameSelection(a: { ids: number[]; focused: number | null },
+                        b: { ids: number[]; focused: number | null }): boolean {
+    return a.focused === b.focused && a.ids.length === b.ids.length &&
+      a.ids.every((id, i) => id === b.ids[i]);
+  }
+
+  private recordSelection(): void {
+    if (this.restoringSelection || this.selection.size === 0) return;
+    const snapshot = { ids: [...this.selection], focused: this.focusedFact };
+    const current = this.selectionHistory[this.selectionHistoryIndex];
+    if (current && this.sameSelection(current, snapshot)) return;
+    this.selectionHistory.splice(this.selectionHistoryIndex + 1);
+    this.selectionHistory.push(snapshot);
+    if (this.selectionHistory.length > 50) this.selectionHistory.shift();
+    this.selectionHistoryIndex = this.selectionHistory.length - 1;
   }
 
   select(ids: number[], mode: "set" | "add" = "set"): void {
     if (mode === "set") this.selection.clear();
     for (const id of ids) this.selection.add(id);
-    this.focusedFact = ids.length ? ids[ids.length - 1] : null;
+    this.focusedFact = ids.length ? ids[ids.length - 1] : this.focusedFact;
+    if (!this.selection.size) this.focusedFact = null;
+    this.recordSelection();
     this.emit("selection");
   }
 
@@ -107,6 +151,35 @@ class Store {
     this.selection.clear();
     this.focusedFact = null;
     this.emit("selection");
+  }
+
+  canNavigateSelectionHistory(direction: -1 | 1): boolean {
+    let i = this.selectionHistoryIndex + direction;
+    while (i >= 0 && i < this.selectionHistory.length) {
+      if (this.selectionHistory[i].ids.some((id) => this.facts.has(id))) return true;
+      i += direction;
+    }
+    return false;
+  }
+
+  navigateSelectionHistory(direction: -1 | 1): boolean {
+    let i = this.selectionHistoryIndex + direction;
+    while (i >= 0 && i < this.selectionHistory.length) {
+      const snapshot = this.selectionHistory[i];
+      const ids = snapshot.ids.filter((id) => this.facts.has(id));
+      if (ids.length) {
+        this.selectionHistoryIndex = i;
+        this.restoringSelection = true;
+        this.selection = new Set(ids);
+        this.focusedFact = snapshot.focused != null && this.facts.has(snapshot.focused)
+          ? snapshot.focused : ids[ids.length - 1];
+        this.restoringSelection = false;
+        this.emit("selection");
+        return true;
+      }
+      i += direction;
+    }
+    return false;
   }
 }
 

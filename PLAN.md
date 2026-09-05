@@ -10,7 +10,13 @@ code compiles *from this file*; decisions made while building get folded back in
 HRR geometry, drawn), curate trust, review/undo every write, merge junk entities,
 ask the agent itself to revise its memory. Zero Hermes core changes.
 
-## Status: BUILT & LIVE (compiled 2026-07-02, single session)
+## Current installed build: v1.1.0 (2026-09-05)
+
+UI, reliability, performance, and Zig hit-testing update is installed and verified locally.
+The gateway provider and native DEB shell both report 1.1.0. The v1.1.0 release contains the native packages, source, and checksums.
+Read `HANDOFF.md` for acceptance results and recovery. D-0016 and D-0017 record the new contracts.
+
+## Historical status: BUILT & LIVE (compiled 2026-07-02, single session)
 
 **All phases P0–P7 are implemented, acceptance-tested, and deployed.** The
 wrapper provider is the live `memory.provider` on the running gateway; the
@@ -1766,3 +1772,95 @@ specifically, not generic OSes.
 ## How to apply
 PART 2 token remap at P3 (frontend tokens from day one — cheap), full L2 polish
 + icon generation at P7, reusing the `blossom/tools/blossom_icons.py` pattern.
+
+
+---
+
+# D-0016 · Measured cockpit refinement (2026-09-05)
+
+Status: candidate work on dev. Not deployed or released.
+
+## Vision
+Keep the Eye a calm, precise memory instrument. Make finding, reading, and retracing facts easier.
+Retain the Field geometry, ten palette rows, and the separate garden lane.
+Use clear hierarchy and restrained depth rather than decorative containers.
+
+## Boundaries
+- Preserve the live memory database, journal, bundled provider, Hermes core, and running sessions.
+- Use synthetic fixtures for UI tests and published screenshots. Use isolated database copies for provider tests.
+- Do not change schemas, vector math, retrieval semantics, or journal response immutability for performance.
+- Database copies use SQLite backup and integrity checks, never file-copy a live WAL database.
+- Keep recoverable copies of the installed shell and served frontend before deployment.
+- Deploy static frontend changes separately from provider changes. A UI update does not require a gateway restart.
+- Source/provider defects require isolated regression proof and a separate safe activation decision.
+- Keep master push behind Ben's standing approval gate. GitHub dev updates can proceed after verification.
+
+## Acceptance map
+| Outcome | Required check |
+|---|---|
+| Easier navigation and reading | Synthetic real-input browser checks plus visual review |
+| All themes and text scales | Ten-theme sweep; minimum desktop and large viewport; 85–125% scale |
+| Honest error and empty states | Empty store, missing token, failed requests, disconnect/reconnect |
+| Preserved mutation controls | Typed-ID deletion and duplicate-submit tests on fake RPC only |
+| Faster hot paths | Same-fixture before/after measurements and correctness assertions |
+| Memory preserved | Recovery copy integrity; offline provider regressions; no live mutation tests |
+| Reproducible package | Version match, DEB/RPM payload checks, source archive and checksums |
+| Installed app works | New installed CLI probes and private-Xvfb native WebKitGTK check |
+| Honest completion | Independent review; release/installation receipts and remaining limits |
+
+## Safety token
+Blocked means a named failing check, its evidence, the best working candidate, and the next specific fix.
+A build alone does not prove runtime behavior or authorize database changes.
+
+
+## D-0017 · Zig where it earns its place (2026-09-05)
+
+Ben requests a programming language with style, including Zig, Elixir, Odin, or C.
+Use Zig 0.15.2 for the Field hit-test kernel compiled to WebAssembly.
+The kernel owns pointer geometry only. It does not access the database or change HRR/PCA math.
+Retain strict float64 operations, Map iteration order, first-match ties, and the exact ten-pixel hit boundary.
+Pack coordinates only when facts change. Keep exact fact IDs in JavaScript.
+Use the existing scalar path when WASM is unavailable, invalid, or over capacity.
+Require differential random/boundary tests and measured latency improvement before default enablement.
+The compiler is project-contained, ignored by Git, and SHA256-verified from the official Zig distribution.
+Detailed ABI/build/acceptance contract: docs/dev/2026-09-05/ZIG-SPEC.md.
+
+
+## D-0016 safety and transport contracts
+
+- Undo compares current affected rows with the recorded after-image. Reject an undo that would overwrite newer state.
+- Eye RPC mutations reject a missing or closed journal. Agent delegation remains best-effort journaled and does not block on journal failure.
+- A per-resolved-database operation lock serializes mutation capture, delegate, after-image, and journal append within one process.
+- Entity journal images include affected facts and optional fact_register rows. Legacy journal images retain current register rows where absent.
+- Backup files and manifest counts come from the same in-process mutation boundary. External writers remain outside that boundary.
+- The two SQLite files are not crash-atomic together. A failure between memory commit and journal append can still leave an unjournaled change.
+- Never advertise the process lock as cross-process protection. Cold maintenance is required for a guaranteed quiescent recovery pair.
+- PCA cache identity includes the database path. Empty and singleton stores have defined projections.
+- Preserve NumPy SVD. When threadpoolctl is available, limit BLAS to two threads inside a serialized, restoring context.
+- Read requests have a 20-second timeout and 32 MiB response limit. WebSocket packets have an 8 MiB limit.
+- A mutation wait expires after 30 seconds without aborting or retrying the server action. Show that its outcome is unknown.
+- Identical in-flight mutations share one request. Unknown mutations remain blocked for that page lifetime until the journal is checked.
+- Missing or rejected tokens show an explicit user-controlled retry. Do not loop prompts or reload automatically.
+- Every modal closes its own listeners, ignores stale asynchronous responses, manages keyboard focus, and restores its trigger.
+- Journal-derived text is DOM text, never HTML. Structured fact navigation accepts only known-schema positive safe integer IDs.
+
+
+### D-0016 independent-review amendments
+
+Validate mutation parameters before any provider call. IDs are positive non-boolean integers.
+Trust and trust deltas are finite numbers. Text fields require strings, not coerced structures.
+Reject empty updates. Preserve historical timestamps in the equivalence harness.
+Undo also rejects active later journal events that overlap its resources, even if current bytes match.
+Verified later mutation/undo pairs can be ignored so orderly reverse undo remains possible.
+If a completed Eye mutation loses its journal append, return an error with `committed:true` and `journaled:false`.
+Do not claim that this closes the two-file crash window. The frontend treats the outcome as requiring inspection, not automatic retry.
+
+
+### D-0016 transport review amendments
+
+A mutation acknowledgment must be an object with `ok:true` and a positive integer `event_id`.
+Ask acknowledgments also require string session and reply fields. Backup acknowledgments require the snapshot path and manifest count.
+Malformed or negative acknowledgments keep the outcome unknown and block identical automatic resubmission.
+After a confirmed agent request, rendering or read-refresh failures must not re-enable sending.
+Browser storage is best effort. Denied persistence keeps token and preferences in memory for the current page.
+Clear in-memory authentication before attempting persistent token removal.

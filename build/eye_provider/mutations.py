@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import Any, Dict, List, Optional
 
 from . import images
@@ -38,8 +39,18 @@ def dispatch(prov, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
         "backfill_vectors": backfill_vectors,
     }.get(method)
     if fn is None:
-        return {"error": f"unknown method: {method}"}
-    return fn(prov, params)
+        return {"ok": False, "error": f"unknown method: {method}"}
+    result = fn(prov, params)
+    if (method != "fact.preview_update" and result.get("ok")
+            and result.get("event_id") is None):
+        return {
+            **result,
+            "ok": False,
+            "committed": True,
+            "journaled": False,
+            "error": "mutation committed but journal append failed; inspect state before retry",
+        }
+    return result
 
 
 def _append(prov, kind: str, **kw) -> Optional[Dict[str, Any]]:
@@ -69,7 +80,7 @@ def preview_update(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     if "content" in params:
         for name in store._extract_entities(new_content):
             row = store._conn.execute(
-                "SELECT entity_id FROM entities WHERE name LIKE ?", (name,)
+                "SELECT entity_id FROM entities WHERE name = ? COLLATE NOCASE", (name,)
             ).fetchone()
             if row is None:
                 row = store._conn.execute(
@@ -143,6 +154,9 @@ def fact_update(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     before = images.fact_image(store, fact_id)
     if before is None:
         return {"ok": False, "error": "fact not found"}
+    if "content" in params:
+        if not isinstance(params["content"], str) or not params["content"].strip():
+            return {"ok": False, "error": "content must not be empty"}
     marks = images.max_ids(store)
     updated = store.update_fact(
         fact_id,
@@ -180,7 +194,10 @@ def fact_trust_set(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     """Absolute trust set, applied as a delta through the store API."""
     store = prov.store
     fact_id = int(params["fact_id"])
-    target = max(0.0, min(1.0, float(params["trust"])))
+    raw_target = float(params["trust"])
+    if not math.isfinite(raw_target):
+        return {"ok": False, "error": "trust must be a finite number"}
+    target = max(0.0, min(1.0, raw_target))
     before = images.fact_image(store, fact_id)
     if before is None:
         return {"ok": False, "error": "fact not found"}
@@ -196,7 +213,11 @@ def fact_trust_set(prov, params: Dict[str, Any]) -> Dict[str, Any]:
 def fact_feedback(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     store = prov.store
     fact_id = int(params["fact_id"])
-    helpful = bool(params.get("helpful", params.get("action") == "helpful"))
+    if "helpful" in params and not isinstance(params["helpful"], bool):
+        return {"ok": False, "error": "helpful must be a boolean"}
+    if "helpful" not in params and params.get("action") not in ("helpful", "unhelpful"):
+        return {"ok": False, "error": "helpful boolean required"}
+    helpful = params.get("helpful", params.get("action") == "helpful")
     before = images.fact_image(store, fact_id)
     if before is None:
         return {"ok": False, "error": "fact not found"}
@@ -227,9 +248,28 @@ def _reencode_facts(store, fact_ids: List[int]) -> List[str]:
     return cats
 
 
+def _fact_images(store, fact_ids: List[int]) -> List[Dict[str, Any]]:
+    return [image for fid in fact_ids if (image := images.fact_image(store, fid))]
+
+
+def _restore_entity_change(store, before: Dict[str, Any]) -> Optional[str]:
+    """Compensate a failed entity operation from its complete before-image."""
+    try:
+        for entity in before.get("entities") or []:
+            images.restore_entity(store, entity)
+        categories = set()
+        for fact in before.get("facts") or []:
+            images.restore_fact(store, fact)
+            categories.add(fact.get("category"))
+        _rebuild_banks(store, categories)
+        return None
+    except Exception as exc:
+        logger.exception("Eye entity compensation failed")
+        return str(exc)
+
+
 def entity_merge(prov, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Merge src entity into dst: relink facts, absorb name+aliases,
-    delete src, re-encode affected fact vectors, rebuild banks."""
+    """Merge src into dst and compensate fully if derived-state refresh fails."""
     store = prov.store
     src_id, dst_id = int(params["src_id"]), int(params["dst_id"])
     if src_id == dst_id:
@@ -239,36 +279,47 @@ def entity_merge(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     if src is None or dst is None:
         return {"ok": False, "error": "entity not found"}
 
-    with store._lock:
-        for fid in src["fact_ids"]:
+    affected = sorted(set(src["fact_ids"]) | set(dst["fact_ids"]))
+    before = {"entities": [src, dst], "facts": _fact_images(store, affected)}
+    try:
+        with store._lock:
+            for fid in src["fact_ids"]:
+                store._conn.execute(
+                    "INSERT OR IGNORE INTO fact_entities (fact_id, entity_id) VALUES (?, ?)",
+                    (fid, dst_id),
+                )
+            store._conn.execute("DELETE FROM fact_entities WHERE entity_id = ?", (src_id,))
+            aliases = [a.strip() for a in (dst.get("aliases") or "").split(",") if a.strip()]
+            for candidate in [src["name"]] + [
+                a.strip() for a in (src.get("aliases") or "").split(",") if a.strip()
+            ]:
+                if candidate.lower() != dst["name"].lower() and candidate.lower() not in {
+                    a.lower() for a in aliases
+                }:
+                    aliases.append(candidate)
             store._conn.execute(
-                "INSERT OR IGNORE INTO fact_entities (fact_id, entity_id) VALUES (?, ?)",
-                (fid, dst_id),
+                "UPDATE entities SET aliases = ? WHERE entity_id = ?",
+                (",".join(aliases), dst_id),
             )
-        store._conn.execute("DELETE FROM fact_entities WHERE entity_id = ?", (src_id,))
-        aliases = [a.strip() for a in (dst.get("aliases") or "").split(",") if a.strip()]
-        for candidate in [src["name"]] + [
-            a.strip() for a in (src.get("aliases") or "").split(",") if a.strip()
-        ]:
-            if candidate.lower() != dst["name"].lower() and candidate.lower() not in {
-                a.lower() for a in aliases
-            }:
-                aliases.append(candidate)
-        store._conn.execute(
-            "UPDATE entities SET aliases = ? WHERE entity_id = ?",
-            (",".join(aliases), dst_id),
-        )
-        store._conn.execute("DELETE FROM entities WHERE entity_id = ?", (src_id,))
-        store._conn.commit()
-        affected = sorted(set(src["fact_ids"]) | set(dst["fact_ids"]))
-        cats = _reencode_facts(store, affected)
-        _rebuild_banks(store, cats)
+            store._conn.execute("DELETE FROM entities WHERE entity_id = ?", (src_id,))
+            store._conn.commit()
+            cats = _reencode_facts(store, affected)
+            _rebuild_banks(store, cats)
+    except Exception as exc:
+        recovery_error = _restore_entity_change(store, before)
+        detail = f"entity merge failed; prior state restored: {exc}"
+        if recovery_error:
+            detail += f"; compensation failed: {recovery_error}"
+        return {"ok": False, "error": detail}
 
-    after = {"entities": [images.entity_image(store, dst_id)]}
+    after = {
+        "entities": [images.entity_image(store, dst_id)],
+        "facts": _fact_images(store, affected),
+    }
     ev = _append(prov, "entity.merge", request=params,
                  response={"merged": src["name"], "into": dst["name"],
                            "facts_relinked": len(src["fact_ids"])},
-                 before={"entities": [src, dst]}, after=after)
+                 before=before, after=after)
     return {"ok": True, "merged": src["name"], "into": dst["name"],
             "facts_relinked": len(src["fact_ids"]),
             "event_id": ev["event_id"] if ev else None}
@@ -277,55 +328,83 @@ def entity_merge(prov, params: Dict[str, Any]) -> Dict[str, Any]:
 def entity_alias(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     store = prov.store
     entity_id = int(params["entity_id"])
-    before = images.entity_image(store, entity_id)
-    if before is None:
+    entity_before = images.entity_image(store, entity_id)
+    if entity_before is None:
         return {"ok": False, "error": "entity not found"}
-    with store._lock:
-        updates, args = [], []
-        if "name" in params:
-            updates.append("name = ?")
-            args.append(params["name"])
-        if "aliases" in params:
-            updates.append("aliases = ?")
-            args.append(params["aliases"])
-        if "entity_type" in params:
-            updates.append("entity_type = ?")
-            args.append(params["entity_type"])
-        if not updates:
-            return {"ok": False, "error": "nothing to change"}
-        store._conn.execute(
-            f"UPDATE entities SET {', '.join(updates)} WHERE entity_id = ?",
-            args + [entity_id],
-        )
-        store._conn.commit()
-        cats = []
-        if "name" in params:  # entity name participates in fact encoding
-            cats = _reencode_facts(store, before["fact_ids"])
-            _rebuild_banks(store, cats)
-    after = images.entity_image(store, entity_id)
+    before = {
+        "entities": [entity_before],
+        "facts": _fact_images(store, entity_before["fact_ids"]),
+    }
+    try:
+        with store._lock:
+            updates, args = [], []
+            if "name" in params:
+                updates.append("name = ?")
+                args.append(params["name"].strip())
+            if "aliases" in params:
+                updates.append("aliases = ?")
+                args.append(params["aliases"])
+            if "entity_type" in params:
+                updates.append("entity_type = ?")
+                args.append(params["entity_type"])
+            if not updates:
+                return {"ok": False, "error": "nothing to change"}
+            if "name" in params and not args[0]:
+                return {"ok": False, "error": "name must not be empty"}
+            store._conn.execute(
+                f"UPDATE entities SET {', '.join(updates)} WHERE entity_id = ?",
+                args + [entity_id],
+            )
+            store._conn.commit()
+            if "name" in params:
+                cats = _reencode_facts(store, entity_before["fact_ids"])
+                _rebuild_banks(store, cats)
+    except Exception as exc:
+        recovery_error = _restore_entity_change(store, before)
+        detail = f"entity edit failed; prior state restored: {exc}"
+        if recovery_error:
+            detail += f"; compensation failed: {recovery_error}"
+        return {"ok": False, "error": detail}
+    entity_after = images.entity_image(store, entity_id)
+    after = {
+        "entities": [entity_after],
+        "facts": _fact_images(store, entity_before["fact_ids"]),
+    }
     ev = _append(prov, "entity.alias", request=params,
-                 response={"updated": True},
-                 before={"entities": [before]}, after={"entities": [after]})
-    return {"ok": True, "entity": after, "event_id": ev["event_id"] if ev else None}
+                 response={"updated": True}, before=before, after=after)
+    return {"ok": True, "entity": entity_after,
+            "event_id": ev["event_id"] if ev else None}
 
 
 def entity_remove(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     store = prov.store
     entity_id = int(params["entity_id"])
-    before = images.entity_image(store, entity_id)
-    if before is None:
+    entity_before = images.entity_image(store, entity_id)
+    if entity_before is None:
         return {"ok": False, "error": "entity not found"}
-    with store._lock:
-        store._conn.execute("DELETE FROM fact_entities WHERE entity_id = ?", (entity_id,))
-        store._conn.execute("DELETE FROM entities WHERE entity_id = ?", (entity_id,))
-        store._conn.commit()
-        cats = _reencode_facts(store, before["fact_ids"])
-        _rebuild_banks(store, cats)
+    before = {
+        "entities": [entity_before],
+        "facts": _fact_images(store, entity_before["fact_ids"]),
+    }
+    try:
+        with store._lock:
+            store._conn.execute("DELETE FROM fact_entities WHERE entity_id = ?", (entity_id,))
+            store._conn.execute("DELETE FROM entities WHERE entity_id = ?", (entity_id,))
+            store._conn.commit()
+            cats = _reencode_facts(store, entity_before["fact_ids"])
+            _rebuild_banks(store, cats)
+    except Exception as exc:
+        recovery_error = _restore_entity_change(store, before)
+        detail = f"entity removal failed; prior state restored: {exc}"
+        if recovery_error:
+            detail += f"; compensation failed: {recovery_error}"
+        return {"ok": False, "error": detail}
+    after = {"entities": [], "facts": _fact_images(store, entity_before["fact_ids"])}
     ev = _append(prov, "entity.remove", request=params,
-                 response={"removed": before["name"],
-                           "facts_unlinked": len(before["fact_ids"])},
-                 before={"entities": [before]}, after={"entities": []})
-    return {"ok": True, "removed": before["name"],
+                 response={"removed": entity_before["name"],
+                           "facts_unlinked": len(entity_before["fact_ids"])},
+                 before=before, after=after)
+    return {"ok": True, "removed": entity_before["name"],
             "event_id": ev["event_id"] if ev else None}
 
 
@@ -363,6 +442,110 @@ _UNDOABLE_FACT_KINDS = {
 }
 
 
+def _recorded_image_matches(current: Any, recorded: Any) -> bool:
+    """Compare recorded state fields without using timestamps as identity."""
+    if isinstance(recorded, dict):
+        return isinstance(current, dict) and all(
+            key in current and _recorded_image_matches(current[key], value)
+            for key, value in recorded.items()
+            if key not in ("created_at", "updated_at")
+        )
+    if isinstance(recorded, list):
+        return isinstance(current, list) and len(current) == len(recorded) and all(
+            _recorded_image_matches(now, then) for now, then in zip(current, recorded)
+        )
+    return current == recorded
+
+
+def _event_after_matches(store, before: Dict[str, Any], after: Dict[str, Any]) -> bool:
+    for fact in after.get("facts") or []:
+        if fact and not _recorded_image_matches(images.fact_image(store, fact["fact_id"]), fact):
+            return False
+    if "facts" in after:
+        after_ids = {fact["fact_id"] for fact in after.get("facts") or [] if fact}
+        for fact in before.get("facts") or []:
+            if (fact and fact["fact_id"] not in after_ids
+                    and images.fact_image(store, fact["fact_id"]) is not None):
+                return False
+    for entity in after.get("entities") or []:
+        if entity and not _recorded_image_matches(
+            images.entity_image(store, entity["entity_id"]), entity
+        ):
+            return False
+    if "entities" in after:
+        after_ids = {entity["entity_id"] for entity in after.get("entities") or [] if entity}
+        for entity in before.get("entities") or []:
+            if (entity and entity["entity_id"] not in after_ids
+                    and images.entity_image(store, entity["entity_id"]) is not None):
+                return False
+    return True
+
+
+def _event_resources(event: Dict[str, Any]) -> set:
+    resources = set()
+    for field in ("before", "after"):
+        raw = event.get(field)
+        if not raw:
+            continue
+        try:
+            image = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            continue
+        for fact in image.get("facts") or []:
+            if fact and "fact_id" in fact:
+                resources.add(("fact", int(fact["fact_id"])))
+        for entity in (image.get("entities") or []) + (image.get("entities_created") or []):
+            if entity and "entity_id" in entity:
+                resources.add(("entity", int(entity["entity_id"])))
+    return resources
+
+
+def _later_events(journal, event_id: int) -> List[Dict[str, Any]]:
+    events = []
+    cursor = event_id
+    while True:
+        page = journal.get_events(
+            since_id=cursor, limit=2000, newest_first=False
+        )
+        if not page:
+            return events
+        events.extend(page)
+        cursor = int(page[-1]["event_id"])
+        if len(page) < 2000:
+            return events
+
+
+def _later_overlap(journal, event: Dict[str, Any]) -> Optional[int]:
+    resources = _event_resources(event)
+    if not resources:
+        return None
+    later = _later_events(journal, int(event["event_id"]))
+    by_id = {int(item["event_id"]): item for item in later}
+    ignored = set()
+    for item in later:
+        undo_id = item.get("undone_by")
+        if not undo_id:
+            continue
+        paired = by_id.get(int(undo_id)) or journal.get_event(int(undo_id))
+        if not paired or paired.get("source") != "undo":
+            continue
+        try:
+            request = json.loads(paired.get("request") or "{}")
+        except (TypeError, ValueError):
+            continue
+        try:
+            is_pair = int(request.get("event_id", -1)) == int(item["event_id"])
+        except (TypeError, ValueError):
+            is_pair = False
+        if is_pair:
+            ignored.update((int(item["event_id"]), int(paired["event_id"])))
+    for item in later:
+        later_id = int(item["event_id"])
+        if later_id not in ignored and resources & _event_resources(item):
+            return later_id
+    return None
+
+
 def undo(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     journal = prov.journal
     store = prov.store
@@ -382,6 +565,11 @@ def undo(prov, params: Dict[str, Any]) -> Dict[str, Any]:
     kind, source = ev["kind"], ev["source"]
     cats: set = set()
     current: Dict[str, Any] = {}
+    if later_id := _later_overlap(journal, ev):
+        return {"ok": False,
+                "error": f"resource changed by later event {later_id}; undo rejected"}
+    if not _event_after_matches(store, before, after):
+        return {"ok": False, "error": "state changed since event; undo rejected"}
 
     # Creation events (agent add, eye add, mirror, auto-extract) revert by
     # deleting what they created. An add that deduped onto an existing fact
@@ -419,26 +607,40 @@ def undo(prov, params: Dict[str, Any]) -> Dict[str, Any]:
                 cats.add(f["category"])
             images.delete_orphan_entities(store, after.get("entities_created") or [])
         elif kind == "entity.merge":
-            src, dst = before["entities"][0], before["entities"][1]
-            current = {"entities": [images.entity_image(store, dst["entity_id"])]}
-            extra = set(src["fact_ids"]) - set(dst["fact_ids"])
-            for fid in extra:
-                store._conn.execute(
-                    "DELETE FROM fact_entities WHERE fact_id = ? AND entity_id = ?",
-                    (fid, dst["entity_id"]),
-                )
-            images.restore_entity(store, src)
-            images.restore_entity(store, dst)
-            store._conn.commit()
-            cats.update(_reencode_facts(
-                store, sorted(set(src["fact_ids"]) | set(dst["fact_ids"]))
-            ))
+            current = {
+                "entities": [
+                    image for entity in before.get("entities") or []
+                    if (image := images.entity_image(store, entity["entity_id"]))
+                ],
+                "facts": _fact_images(
+                    store, [fact["fact_id"] for fact in before.get("facts") or []]
+                ),
+            }
+            for entity in before.get("entities") or []:
+                images.restore_entity(store, entity)
+            facts_before = before.get("facts") or []
+            for fact in facts_before:
+                images.restore_fact(store, fact)
+                cats.add(fact["category"])
+            if not facts_before:  # backward compatibility with v1.0.3 events
+                affected = sorted({fid for entity in before["entities"] for fid in entity["fact_ids"]})
+                cats.update(_reencode_facts(store, affected))
         elif kind in ("entity.alias", "entity.remove"):
             ent = before["entities"][0]
             live = images.entity_image(store, ent["entity_id"])
-            current = {"entities": [live] if live else []}
+            current = {
+                "entities": [live] if live else [],
+                "facts": _fact_images(
+                    store, [fact["fact_id"] for fact in before.get("facts") or []]
+                ),
+            }
             images.restore_entity(store, ent)
-            cats.update(_reencode_facts(store, ent["fact_ids"]))
+            facts_before = before.get("facts") or []
+            for fact in facts_before:
+                images.restore_fact(store, fact)
+                cats.add(fact["category"])
+            if not facts_before:  # backward compatibility with v1.0.3 events
+                cats.update(_reencode_facts(store, ent["fact_ids"]))
         elif kind == "backfill_vectors":
             for f in before.get("facts") or []:
                 images.restore_fact(store, f)

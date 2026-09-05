@@ -9,7 +9,7 @@ DST="$HOME/.hermes/plugins/holographic-eye"
 FRONTEND_SRC="$(cd "$(dirname "$0")" && pwd)/eye_frontend/dist"
 
 mkdir -p "$DST"
-rsync -a --delete --exclude '__pycache__' --exclude 'frontend' "$SRC/" "$DST/"
+rsync -a --exclude '__pycache__' --exclude 'frontend' "$SRC/" "$DST/"
 if [ -d "$FRONTEND_SRC" ]; then
   mkdir -p "$DST/frontend"
   rsync -a --delete "$FRONTEND_SRC/" "$DST/frontend/"
@@ -19,7 +19,7 @@ fi
 CMD_SRC="$(cd "$(dirname "$0")/eye_commands" && pwd)"
 CMD_DST="$HOME/.hermes/plugins/holographic-eye-commands"
 mkdir -p "$CMD_DST"
-rsync -a --delete --exclude '__pycache__' "$CMD_SRC/" "$CMD_DST/"
+rsync -a --exclude '__pycache__' "$CMD_SRC/" "$CMD_DST/"
 
 echo "deployed → $DST (+ $CMD_DST)"
 ls "$DST"

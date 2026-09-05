@@ -22,12 +22,12 @@ Copyright (C) 2026 Ben. GPLv3 — see LICENSE.
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from plugins.memory.holographic import holographic as hrr
 
 _pca_lock = threading.Lock()
-_pca_cache: Optional[Dict[str, Any]] = None
+_pca_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def _np():
@@ -42,12 +42,21 @@ def _embed(np, phases):
     return np.concatenate([np.cos(phases), np.sin(phases)], axis=1)
 
 
+def _svd(np, matrix):
+    """Run the unchanged SVD with a scoped OpenBLAS thread cap when available."""
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:
+        return np.linalg.svd(matrix, full_matrices=False), None
+    with threadpool_limits(limits=2, user_api="blas"):
+        return np.linalg.svd(matrix, full_matrices=False), 2
+
+
 # ---------------------------------------------------------------------------
 # field.projection
 # ---------------------------------------------------------------------------
 
 def field_projection(prov, params: Dict[str, Any]) -> Dict[str, Any]:
-    global _pca_cache
     np = _np()
     store = prov.store
     rows = store._conn.execute(
@@ -60,36 +69,50 @@ def field_projection(prov, params: Dict[str, Any]) -> Dict[str, Any]:
 
     with_vec = [r for r in rows if r["hrr_vector"] is not None]
     dim = store.hrr_dim
+    try:
+        db_key = str(store.db_path.resolve())
+    except Exception:
+        db_key = str(store.db_path)
     coords: Dict[int, List[float]] = {}
     meta: Dict[str, Any] = {"projector": "pca", "dim": dim,
                             "n_vectors": len(with_vec), "fitted": False}
 
-    if len(with_vec) >= 3:
+    if len(with_vec) == 1:
+        coords[with_vec[0]["fact_id"]] = [0.0, 0.0]
+        meta["explained_variance"] = [0.0, 0.0]
+        meta["fitted_n"] = 1
+        meta["fitted"] = True
+    elif len(with_vec) >= 2:
         phases = np.stack([hrr.bytes_to_phases(r["hrr_vector"]) for r in with_vec])
         X = _embed(np, phases)
         with _pca_lock:
-            cache = _pca_cache
+            cache = _pca_cache.get(db_key)
             if (cache is None or params.get("refit")
                     or cache["dim"] != X.shape[1]):
                 mean = X.mean(axis=0)
                 Xc = X - mean
-                _, s, vt = np.linalg.svd(Xc, full_matrices=False)
+                (_, s, vt), svd_threads = _svd(np, Xc)
+                meta["svd_threads"] = svd_threads
                 comp = vt[:2].copy()
                 for i in range(2):  # deterministic sign convention
                     j = int(np.argmax(np.abs(comp[i])))
                     if comp[i][j] < 0:
                         comp[i] = -comp[i]
                 total = float((s ** 2).sum()) or 1.0
-                cache = _pca_cache = {
+                cache = {
                     "mean": mean, "comp": comp, "dim": X.shape[1],
+                    "db_key": db_key,
+                    "svd_threads": svd_threads,
                     "explained": [float(s[0] ** 2 / total),
                                   float(s[1] ** 2 / total)],
                     "fitted_n": len(with_vec),
                 }
+                _pca_cache[db_key] = cache
                 meta["fitted"] = True
             xy = (X - cache["mean"]) @ cache["comp"].T
             meta["explained_variance"] = cache["explained"]
             meta["fitted_n"] = cache["fitted_n"]
+            meta["svd_threads"] = cache.get("svd_threads")
         for r, (x, y) in zip(with_vec, xy):
             coords[r["fact_id"]] = [round(float(x), 5), round(float(y), 5)]
 

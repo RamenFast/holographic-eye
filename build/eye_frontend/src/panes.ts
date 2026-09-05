@@ -3,6 +3,7 @@
    GPLv3 — see LICENSE. */
 
 import { rpc, toolRead } from "./api";
+import { getStored, setStored } from "./storage";
 import { store, fid, EyeEvent, CAT_HUES, catColor } from "./state";
 import { escapeHtml } from "./field";
 import { openWorkbench, openFft, openEditPreview, openDeleteModal } from "./modals";
@@ -23,6 +24,11 @@ function h(html: string): HTMLElement {
 // Left column
 // ---------------------------------------------------------------------------
 
+function storedReviewTime(): number {
+  const value = Number(getStored("eyeLastReviewed") || 0);
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
 export class LeftColumn {
   private el: HTMLElement;
   private tab: "entities" | "queue" | "contra" = "entities";
@@ -30,21 +36,30 @@ export class LeftColumn {
   private expanded = false;
   private disclosed = new Set<string>(); // entities with facts unfolded (r2 #4)
   private contraData: any[] | null = null;
-  private lastReviewed = Number(localStorage.getItem("eyeLastReviewed") || 0);
+  private lastReviewed = storedReviewTime();
+  private renderPending = false;
 
   constructor(el: HTMLElement) {
     this.el = el;
-    store.on("entities", () => this.render());
-    store.on("events", () => this.render());
+    store.on("entities", () => this.scheduleRender());
+    store.on("events", () => this.scheduleRender());
     this.render();
-    setInterval(() => { if (this.tab === "entities") this.render(); }, 15000);
+  }
+
+  private scheduleRender(): void {
+    if (this.renderPending) return;
+    this.renderPending = true;
+    requestAnimationFrame(() => {
+      this.renderPending = false;
+      this.render();
+    });
   }
 
   private setTab(t: "entities" | "queue" | "contra"): void {
     this.tab = t;
     if (t === "queue") {
       this.lastReviewed = Date.now();
-      localStorage.setItem("eyeLastReviewed", String(this.lastReviewed));
+      setStored("eyeLastReviewed", String(this.lastReviewed));
     }
     if (t === "contra" && this.contraData === null) this.loadContra();
     this.render();
@@ -74,15 +89,28 @@ export class LeftColumn {
     else if (this.tab === "queue") body = this.renderQueue();
     else body = this.renderContra();
 
+    const tabButton = (id: "entities" | "queue" | "contra", label: string) =>
+      `<button type="button" role="tab" class="tab ${this.tab === id ? "active" : ""}" ` +
+      `id="tab-${id}" aria-selected="${this.tab === id}" aria-controls="left-tabpanel" ` +
+      `tabindex="${this.tab === id ? "0" : "-1"}" data-t="${id}">${label}</button>`;
     this.el.innerHTML = `
-      <div class="tabs">
-        <div class="tab ${this.tab === "entities" ? "active" : ""}" data-t="entities">ENTITIES</div>
-        <div class="tab ${this.tab === "queue" ? "active" : ""}" data-t="queue">QUEUE${badge ? ` <span class="badge">${badge}</span>` : ""}</div>
-        <div class="tab ${this.tab === "contra" ? "active" : ""}" data-t="contra">CONTRA</div>
-      </div>${body}`;
+      <div class="tabs" role="tablist" aria-label="Evidence bench">
+        ${tabButton("entities", "ENTITIES")}
+        ${tabButton("queue", `QUEUE${badge ? ` <span class="badge">${badge}</span>` : ""}`)}
+        ${tabButton("contra", "CONTRA")}
+      </div><div id="left-tabpanel" role="tabpanel" aria-labelledby="tab-${this.tab}">${body}</div>`;
 
-    this.el.querySelectorAll<HTMLElement>(".tab").forEach((tabEl) => {
+    this.el.querySelectorAll<HTMLButtonElement>(".tab").forEach((tabEl) => {
       tabEl.onclick = () => this.setTab(tabEl.dataset.t as any);
+      tabEl.onkeydown = (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const order: ("entities" | "queue" | "contra")[] = ["entities", "queue", "contra"];
+        const step = event.key === "ArrowRight" ? 1 : -1;
+        const next = order[(order.indexOf(this.tab) + step + order.length) % order.length];
+        this.setTab(next);
+        this.el.querySelector<HTMLButtonElement>(`[data-t="${next}"]`)?.focus();
+      };
     });
     this.bind();
   }
@@ -260,6 +288,14 @@ function queueSummary(ev: EyeEvent, req: any, resp: any): string {
   }
 }
 
+const probeGenerations = new Map<string, number>();
+
+function invalidateProbe(name: string): number {
+  const generation = (probeGenerations.get(name) ?? 0) + 1;
+  probeGenerations.set(name, generation);
+  return generation;
+}
+
 function rebuildHighlightUnion(): void {
   store.entityHighlight = new Set<number>();
   for (const hits of store.highlightedEntities.values()) {
@@ -282,6 +318,7 @@ function logHighlightState(field: any, probeLines: string[] = []): void {
 export async function highlightEntity(name: string | null): Promise<void> {
   const field = (window as any).eyeField;
   if (!name) return clearEntityHighlights();
+  const generation = invalidateProbe(name);
   if (store.highlightedEntities.has(name)) {
     store.highlightedEntities.delete(name);
     rebuildHighlightUnion();
@@ -320,8 +357,8 @@ export async function highlightEntity(name: string | null): Promise<void> {
       }
     }
   } catch { /* probe unavailable — linked set stands */ }
-  // the entity may have been toggled off while the probe ran
-  if (!store.highlightedEntities.has(name)) return;
+  // Ignore a response after this entity was toggled, cleared, or probed again.
+  if (!store.highlightedEntities.has(name) || probeGenerations.get(name) !== generation) return;
   store.highlightedEntities.set(name, hits);
   rebuildHighlightUnion();
   logHighlightState(field, [
@@ -331,7 +368,16 @@ export async function highlightEntity(name: string | null): Promise<void> {
   store.emit("entities");
 }
 
+export function clearEntityHighlight(name: string): void {
+  invalidateProbe(name);
+  if (!store.highlightedEntities.delete(name)) return;
+  rebuildHighlightUnion();
+  logHighlightState((window as any).eyeField);
+  store.emit("entities");
+}
+
 export function clearEntityHighlights(): void {
+  for (const name of store.highlightedEntities.keys()) invalidateProbe(name);
   store.highlightedEntities.clear();
   store.entityHighlight.clear();
   (window as any).eyeField?.logMath([]);
@@ -386,6 +432,9 @@ function entityMenu(e: MouseEvent, entityId: number, name: string): void {
 
 export class Inspect {
   private el: HTMLElement;
+  private manualOpen = false;
+  private renderGeneration = 0;
+
   constructor(el: HTMLElement) {
     this.el = el;
     store.on("selection", () => this.render());
@@ -393,68 +442,140 @@ export class Inspect {
     this.render();
   }
 
+  private setOpen(open: boolean): void {
+    this.el.classList.toggle("open", open);
+    this.el.parentElement?.classList.toggle("inspect-open", open);
+  }
+
+  private historyControls(): string {
+    return `<div class="inspect-history" aria-label="Selection history">
+      <button type="button" class="icon-btn" id="inspect-back" title="Previous selection · Alt+Left"
+        aria-label="Previous selection" ${store.canNavigateSelectionHistory(-1) ? "" : "disabled"}>←</button>
+      <button type="button" class="icon-btn" id="inspect-forward" title="Next selection · Alt+Right"
+        aria-label="Next selection" ${store.canNavigateSelectionHistory(1) ? "" : "disabled"}>→</button>
+    </div>`;
+  }
+
+  private header(clearSelection: boolean): string {
+    return `<div class="inspect-head">
+      <span class="pane-label">Inspect</span>
+      ${this.historyControls()}
+      <button type="button" class="icon-btn inspect-close" id="inspect-close"
+        title="${clearSelection ? "Clear selection" : "Close Inspect"}"
+        aria-label="${clearSelection ? "Clear selection" : "Close Inspect"}">×</button>
+    </div>`;
+  }
+
+  private bindHeader(clearSelection: boolean): void {
+    this.el.querySelector<HTMLButtonElement>("#inspect-back")?.addEventListener("click", () =>
+      store.navigateSelectionHistory(-1));
+    this.el.querySelector<HTMLButtonElement>("#inspect-forward")?.addEventListener("click", () =>
+      store.navigateSelectionHistory(1));
+    this.el.querySelector<HTMLButtonElement>("#inspect-close")?.addEventListener("click", () => {
+      if (clearSelection) store.clearSelection();
+      else { this.manualOpen = false; this.render(); }
+    });
+  }
+
   async render(): Promise<void> {
+    const generation = ++this.renderGeneration;
     const sel = [...store.selection];
     if (sel.length === 0) {
-      this.el.innerHTML = `<div class="pane-label">Inspect</div>
-        <div class="pane-hint">click a dot — or drag-select a region.<br><br>
-        the field is the agent's real HRR geometry; everything you see is in the database.</div>`;
+      this.setOpen(this.manualOpen);
+      if (!this.manualOpen) {
+        this.el.innerHTML = `<button type="button" class="inspect-rail-button" id="inspect-open"
+          aria-label="Open Inspect" title="Open Inspect"><span>INSPECT</span><b>›</b></button>`;
+        this.el.querySelector<HTMLButtonElement>("#inspect-open")!.onclick = () => {
+          this.manualOpen = true;
+          this.render();
+        };
+        return;
+      }
+      this.el.innerHTML = `${this.header(false)}
+        <div class="inspect-empty"><p>Select a Field point to inspect its evidence.</p>
+        <p>Drag across the Field for an aggregate view.</p></div>`;
+      this.bindHeader(false);
       return;
     }
-    if (sel.length > 1) return this.renderMulti(sel);
+
+    this.setOpen(true);
+    if (sel.length > 1) {
+      this.renderMulti(sel);
+      return;
+    }
 
     const id = sel[0];
+    this.el.innerHTML = `${this.header(true)}<div class="inspect-body">
+      <section class="inspect-band identity-band" aria-labelledby="inspect-loading">
+        <h2 id="inspect-loading">Identity</h2><div class="factid">${fid(id)}</div>
+        <p class="inspect-loading">loading evidence…</p>
+      </section></div>`;
+    this.bindHeader(true);
     let fact: any;
     try {
       fact = (await rpc("fact.get", { fact_id: id })).fact;
     } catch {
       fact = store.facts.get(id);
     }
-    if (!fact) return;
+    if (generation !== this.renderGeneration || store.selection.size !== 1 ||
+        !store.selection.has(id)) return;
+    if (!fact) {
+      store.clearSelection();
+      return;
+    }
     const catInk = catColor(fact.category, 0.85);
     const trust = Number(fact.trust_score);
     const local = store.facts.get(id);
     const entChips = (fact.links ?? []).map((l: any) =>
-      `<span class="ent-chip" data-name="${escapeHtml(l.name)}">${escapeHtml(l.name)}</span>`).join("") ||
-      `<span class="pane-hint">no entities extracted</span>`;
+      `<button type="button" class="ent-chip" data-name="${escapeHtml(l.name)}">${escapeHtml(l.name)}</button>`).join("") ||
+      `<span class="pane-hint inline">no entities extracted</span>`;
 
-    this.el.innerHTML = `
-      <div class="pane-label">Inspect</div>
-      <div class="factid">${fid(id)}</div>
+    this.el.innerHTML = `${this.header(true)}
       <div class="inspect-body">
-        <div class="chips"><span class="chip-cat" style="color:${catInk}">${escapeHtml(fact.category.toUpperCase())}</span></div>
-        <div class="tags">${escapeHtml(fact.tags || "no tags")}</div>
-        <div class="content" id="ins-content">${escapeHtml(fact.content)}</div>
-        <div class="editlinks">
-          <a id="edit-content">edit content</a>
-          <a id="edit-category">edit category ▾</a>
-          <a id="edit-tags">edit tags</a>
-        </div>
-        <div class="kv">
-          <span class="k">trust</span>
-          <span><span class="trustbar"><span class="fill" style="width:${trust * 100}%;background:${catColor(fact.category, 0.7)}"></span><span class="minline" style="left:${(store.stats.min_trust ?? 0.3) * 100}%" title="min_trust ${store.stats.min_trust ?? 0.3} — prefetch/search floor"></span></span> <span class="v">${trust.toFixed(2)}</span></span>
-          <span class="k">retrievals</span><span class="v">${fact.journal_retrievals ?? local?.retrieval_count ?? 0}× <span class="k">(journal-observed)</span></span>
-          <span class="k">helpful</span><span class="v">${fact.helpful_count}×</span>
-        </div>
-        <div class="ts">created&nbsp;&nbsp;${fact.created_at}<br>updated&nbsp;&nbsp;${fact.updated_at}</div>
-        <div class="ent-chips">${entChips}</div>
-        <div class="vecline">hrr_vector&nbsp;&nbsp;${fact.vector_bytes ? `${fact.vector_bytes} B (${store.stats.hrr_dim ?? 1024} × f64)` : "NULL — not in the algebra"}</div>
-        <div class="linkrow">
-          ${fact.vector_bytes ? `<a id="ins-algebra">inspect algebra</a>` : `<a id="ins-backfill">backfill vector</a>`}
-          <a id="ins-export">export fact</a>
-          <a id="ins-reason">reason…</a>
-        </div>
-        <div class="actions">
-          <button class="btn good" id="fb-up">👍 helpful</button>
-          <button class="btn bad" id="fb-down">👎 unhelpful</button>
-          <button class="btn undo" id="ins-undo" title="undo the most recent journaled change to this fact">↶ undo</button>
-          <button class="btn del" id="ins-del">delete</button>
-        </div>
-        <div class="kv" style="margin-top:10px">
-          <span class="k">set trust</span>
-          <span><input type="range" id="trust-slider" min="0" max="1" step="0.05" value="${trust}" style="width:120px;vertical-align:middle"> <span class="v" id="trust-val">${trust.toFixed(2)}</span></span>
-        </div>
+        <section class="inspect-band identity-band" aria-labelledby="inspect-identity">
+          <h2 id="inspect-identity">Identity</h2>
+          <div class="factid">${fid(id)}</div>
+          <div class="chips"><span class="chip-cat" style="color:${catInk}">${escapeHtml(fact.category.toUpperCase())}</span></div>
+          <div class="tags">${escapeHtml(fact.tags || "no tags")}</div>
+          <div class="content" id="ins-content">${escapeHtml(fact.content)}</div>
+          <div class="editlinks" aria-label="Edit fact">
+            <button type="button" class="text-action" id="edit-content">edit content</button>
+            <button type="button" class="text-action" id="edit-category">edit category ▾</button>
+            <button type="button" class="text-action" id="edit-tags">edit tags</button>
+          </div>
+        </section>
+        <section class="inspect-band evidence-band" aria-labelledby="inspect-evidence">
+          <h2 id="inspect-evidence">Evidence</h2>
+          <div class="kv">
+            <span class="k">trust</span>
+            <span><span class="trustbar"><span class="fill" style="width:${trust * 100}%;background:${catColor(fact.category, 0.7)}"></span><span class="minline" style="left:${(store.stats.min_trust ?? 0.3) * 100}%" title="min_trust ${store.stats.min_trust ?? 0.3} — prefetch/search floor"></span></span> <span class="v">${trust.toFixed(2)}</span></span>
+            <span class="k">retrievals</span><span class="v">${fact.journal_retrievals ?? local?.retrieval_count ?? 0}× <span class="k">journal-observed</span></span>
+            <span class="k">helpful</span><span class="v">${fact.helpful_count}×</span>
+          </div>
+          <div class="ts">created&nbsp;&nbsp;${fact.created_at}<br>updated&nbsp;&nbsp;${fact.updated_at}</div>
+          <div class="ent-chips" aria-label="Linked entities">${entChips}</div>
+          <div class="vecline">hrr_vector&nbsp;&nbsp;${fact.vector_bytes ? `${fact.vector_bytes} B (${store.stats.hrr_dim ?? 1024} × f64)` : "NULL — not in the algebra"}</div>
+          <div class="linkrow">
+            ${fact.vector_bytes ? `<button type="button" class="text-action" id="ins-algebra">inspect algebra</button>` : `<button type="button" class="text-action" id="ins-backfill">backfill vector</button>`}
+            <button type="button" class="text-action" id="ins-export">export fact</button>
+            <button type="button" class="text-action" id="ins-reason">reason…</button>
+          </div>
+        </section>
+        <section class="inspect-band actions-band" aria-labelledby="inspect-actions">
+          <h2 id="inspect-actions">Actions</h2>
+          <div class="actions">
+            <button class="btn good" id="fb-up">👍 helpful</button>
+            <button class="btn bad" id="fb-down">👎 unhelpful</button>
+            <button class="btn undo" id="ins-undo" title="Undo the most recent journaled change to this fact">↶ undo</button>
+            <button class="btn del" id="ins-del">delete</button>
+          </div>
+          <div class="kv trust-control">
+            <label class="k" for="trust-slider">set trust</label>
+            <span><input type="range" id="trust-slider" min="0" max="1" step="0.05" value="${trust}" style="width:120px;vertical-align:middle"> <span class="v" id="trust-val">${trust.toFixed(2)}</span></span>
+          </div>
+        </section>
       </div>`;
+    this.bindHeader(true);
     this.bindSingle(id, fact);
   }
 
@@ -469,23 +590,32 @@ export class Inspect {
     }
     const catRows = [...cats.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) =>
       `<span class="k">${escapeHtml(c)}</span><span class="v">${"▓".repeat(Math.max(1, Math.round(n / facts.length * 10)))} ${n}</span>`).join("");
-    this.el.innerHTML = `
-      <div class="pane-label">Inspect</div>
-      <div class="factid">${facts.length} facts selected</div>
+    this.el.innerHTML = `${this.header(true)}
       <div class="inspect-body">
-        <div class="kv">
-          <span class="k">mean trust</span><span class="v">${mean.toFixed(2)}</span>
-          <span class="k">retrievals</span><span class="v">${retr}×</span>
-          <span class="k">helpful</span><span class="v">${help}×</span>
-        </div>
-        <div class="kv">${catRows}</div>
-        <div class="actions">
-          <button class="btn good" id="bulk-up">bulk 👍</button>
-          <button class="btn bad" id="bulk-down">bulk 👎</button>
-          <button class="btn" id="bulk-export">bulk export</button>
-          <button class="btn" id="bulk-ask">ask the agent…</button>
-        </div>
+        <section class="inspect-band identity-band" aria-labelledby="inspect-selection">
+          <h2 id="inspect-selection">Identity</h2>
+          <div class="factid">${facts.length} facts selected</div>
+        </section>
+        <section class="inspect-band evidence-band" aria-labelledby="inspect-aggregate">
+          <h2 id="inspect-aggregate">Evidence</h2>
+          <div class="kv">
+            <span class="k">mean trust</span><span class="v">${mean.toFixed(2)}</span>
+            <span class="k">retrievals</span><span class="v">${retr}×</span>
+            <span class="k">helpful</span><span class="v">${help}×</span>
+          </div>
+          <div class="kv">${catRows}</div>
+        </section>
+        <section class="inspect-band actions-band" aria-labelledby="inspect-bulk-actions">
+          <h2 id="inspect-bulk-actions">Actions</h2>
+          <div class="actions">
+            <button class="btn good" id="bulk-up">bulk 👍</button>
+            <button class="btn bad" id="bulk-down">bulk 👎</button>
+            <button class="btn" id="bulk-export">bulk export</button>
+            <button class="btn commit" id="bulk-ask">ask the agent…</button>
+          </div>
+        </section>
       </div>`;
+    this.bindHeader(true);
     (this.el.querySelector("#bulk-up") as HTMLElement).onclick = () => this.bulkFeedback(sel, true);
     (this.el.querySelector("#bulk-down") as HTMLElement).onclick = () => this.bulkFeedback(sel, false);
     (this.el.querySelector("#bulk-export") as HTMLElement).onclick = () => this.exportFacts(sel);
@@ -515,6 +645,7 @@ export class Inspect {
       ? `holo_eye_fact_${String(ids[0]).padStart(4, "0")}.json`
       : `holo_eye_facts_${ids.length}.json`;
     a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   private bindSingle(id: number, fact: any): void {

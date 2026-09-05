@@ -1,47 +1,119 @@
 // The Holographic Eye — Tauri shell (D-0005).
-// A native Cinnamon-friendly window onto the control plane's frontend.
-// Reads the bearer token from ~/.hermes/eye_token at launch; the UI itself
-// is served by the wrapper provider inside the gateway (127.0.0.1:8770),
-// so the shell stays a thin pane of glass.
 // Copyright (C) 2026 Ben. GPLv3 — see LICENSE.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+mod cli;
 
-const PLANE: &str = "http://127.0.0.1:8770";
+use std::path::PathBuf;
+use std::time::Duration;
+use tauri::{WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-fn eye_url() -> String {
-    let token = dirs::home_dir()
-        .map(|h| h.join(".hermes").join("eye_token"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|t| t.trim().to_string())
-        .unwrap_or_default();
-    if token.is_empty() {
-        // no token → land on the plane root; the frontend will prompt
-        format!("{PLANE}/")
-    } else {
-        format!("{PLANE}/?token={token}")
+fn eye_url_with_token(token: Option<&str>) -> Result<tauri::Url, String> {
+    let mut url = tauri::Url::parse(cli::PLANE)
+        .map_err(|error| format!("invalid control-plane URL: {error}"))?;
+    if let Some(token) = token.map(str::trim).filter(|token| !token.is_empty()) {
+        url.query_pairs_mut().append_pair("token", token);
     }
+    Ok(url)
 }
 
-fn main() {
-    // version law: package version == --version output == filename == tag
-    if std::env::args().any(|a| a == "--version" || a == "-V") {
-        println!("holographic-eye {}", env!("CARGO_PKG_VERSION"));
+fn eye_url() -> Result<tauri::Url, String> {
+    eye_url_with_token(cli::read_token().as_deref())
+}
+
+fn wait_for_gateway(window: WebviewWindow) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(2));
+        if !cli::gateway_health().available {
+            continue;
+        }
+        let Ok(url) = eye_url() else {
+            return;
+        };
+        let navigate_window = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            let _ = navigate_window.navigate(url);
+        });
         return;
-    }
+    });
+}
+
+fn launch_gui() -> Result<(), String> {
     tauri::Builder::default()
         .setup(|app| {
-            let url: tauri::Url = eye_url().parse().expect("static url");
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            let gateway_ready = cli::gateway_health().available;
+            let start_url = if gateway_ready {
+                WebviewUrl::External(eye_url().map_err(std::io::Error::other)?)
+            } else {
+                WebviewUrl::App(PathBuf::from("index.html"))
+            };
+            let window = WebviewWindowBuilder::new(app, "main", start_url)
                 .title("The Holographic Eye")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(1100.0, 680.0)
                 .background_color(tauri::window::Color(0, 0, 0, 255))
                 .build()?;
+            if !gateway_ready {
+                wait_for_gateway(window);
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while launching The Holographic Eye");
+        .map_err(|_| "native window initialization failed".to_string())
+}
+
+fn main() {
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    let force_json = raw_args.iter().any(|arg| arg == "--json");
+    let route = match cli::parse_args(raw_args) {
+        Ok(route) => route,
+        Err(error) => {
+            cli::emit_usage_error(&error, force_json);
+            std::process::exit(3);
+        }
+    };
+
+    if route.command == cli::Command::Gui {
+        if let Err(error) = launch_gui() {
+            cli::emit_runtime_error(&error);
+            std::process::exit(4);
+        }
+    } else {
+        let exit = cli::run(route);
+        if exit != 0 {
+            std::process::exit(exit);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsafe_token_bytes_are_url_encoded_and_round_trip() {
+        let token = "broken #%?&/=+[]{} snowman=☃";
+        let url = eye_url_with_token(Some(token)).unwrap();
+        assert!(!url.as_str().contains("broken #"));
+        assert_eq!(
+            url.query_pairs().find(|(key, _)| key == "token").unwrap().1,
+            token
+        );
+    }
+
+    #[test]
+    fn token_edges_are_trimmed_before_encoding() {
+        let url = eye_url_with_token(Some("\n\t value with spaces \r\n")).unwrap();
+        assert_eq!(url.query_pairs().next().unwrap().1, "value with spaces");
+    }
+
+    #[test]
+    fn missing_or_empty_token_uses_the_control_plane_root() {
+        assert_eq!(
+            eye_url_with_token(None).unwrap().as_str(),
+            "http://127.0.0.1:8770/"
+        );
+        assert_eq!(eye_url_with_token(Some(" \n")).unwrap().query(), None);
+    }
 }

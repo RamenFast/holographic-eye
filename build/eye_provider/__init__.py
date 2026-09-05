@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from contextlib import nullcontext
 import time
 from typing import Any, Dict, List, Optional
 
@@ -34,7 +35,7 @@ from .journal import EyeJournal
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.0.3"
+__version__ = "1.1.0"
 
 _MUTATING_FACT_ACTIONS = {"add", "update", "remove"}
 _READ_FACT_ACTIONS = {"search", "probe", "related", "reason", "contradict", "list"}
@@ -45,6 +46,22 @@ _READ_FACT_ACTIONS = {"search", "probe", "related", "reason", "contradict", "lis
 _boot_provider: Optional["EyeMemoryProvider"] = None
 _boot_warm_started = False
 _boot_warm_lock = threading.Lock()
+
+# Serialize each wrapper operation from before-image through journal append.
+# MemoryStore's own lock only covers the delegated SQLite call; without this
+# wider lock two provider instances can record stale or crossed journal images.
+_operation_locks: Dict[str, threading.RLock] = {}
+_operation_locks_guard = threading.Lock()
+
+
+def _operation_lock_for(store) -> threading.RLock:
+    path = getattr(store, "db_path", None)
+    try:
+        key = str(path.resolve())
+    except Exception:
+        key = str(path or id(store))
+    with _operation_locks_guard:
+        return _operation_locks.setdefault(key, threading.RLock())
 
 
 def _is_gateway_process() -> bool:
@@ -81,6 +98,7 @@ class EyeMemoryProvider(MemoryProvider):
         self._session_id = ""
         self._journal: Optional[EyeJournal] = None
         self._control = None
+        self._operation_lock = threading.RLock()
         if inner is not None:
             self._inner = inner
         else:
@@ -119,6 +137,8 @@ class EyeMemoryProvider(MemoryProvider):
         boot_warm = bool(kwargs.pop("_eye_boot_warm", False))
         self._inner.initialize(session_id, **kwargs)
         self._session_id = session_id
+        if self.store is not None:
+            self._operation_lock = _operation_lock_for(self.store)
         # read-path acceleration (D-0012): memoize the bundled encoders —
         # zero upstream diffs (I1), byte-identical results (I2), probe
         # drops from ~4 s to ~ms; prewarm runs off the critical path
@@ -262,52 +282,59 @@ class EyeMemoryProvider(MemoryProvider):
             logger.debug("Eye prefetch journaling failed: %s", e)
 
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs) -> str:
-        before = self._capture_before(tool_name, args)
-        marks = self._safe_marks()
-        t0 = time.perf_counter()
-        result = self._inner.handle_tool_call(tool_name, args, **kwargs)
-        duration = (time.perf_counter() - t0) * 1000.0
-        try:
-            self._journal_tool_call(tool_name, args, result, before, marks, duration)
-        except Exception as e:
-            logger.debug("Eye tool-call journaling failed: %s", e)
-        return result
+        mutating = (
+            tool_name == "fact_feedback"
+            or (tool_name == "fact_store" and args.get("action") in _MUTATING_FACT_ACTIONS)
+        )
+        with (self._operation_lock if mutating else nullcontext()):
+            before = self._capture_before(tool_name, args)
+            marks = self._safe_marks()
+            t0 = time.perf_counter()
+            result = self._inner.handle_tool_call(tool_name, args, **kwargs)
+            duration = (time.perf_counter() - t0) * 1000.0
+            try:
+                self._journal_tool_call(tool_name, args, result, before, marks, duration)
+            except Exception as e:
+                logger.debug("Eye tool-call journaling failed: %s", e)
+            return result
 
     def on_memory_write(self, action: str, target: str, content: str,
                         metadata: Optional[Dict[str, Any]] = None) -> None:
-        marks = self._safe_marks()
-        self._inner.on_memory_write(action, target, content)
-        try:
-            after = (
-                images.created_since(self.store, marks)
-                if marks and self.store else None
-            )
-            self._append(
-                "mirror", action or "add",
-                request={"action": action, "target": target, "content": content,
-                         "metadata": metadata or {}},
-                after=after,
-            )
-        except Exception as e:
-            logger.debug("Eye mirror journaling failed: %s", e)
+        with self._operation_lock:
+            marks = self._safe_marks()
+            self._inner.on_memory_write(action, target, content)
+            try:
+                after = (
+                    images.created_since(self.store, marks)
+                    if marks and self.store else None
+                )
+                self._append(
+                    "mirror", action or "add",
+                    request={"action": action, "target": target, "content": content,
+                             "metadata": metadata or {}},
+                    after=after,
+                )
+            except Exception as e:
+                logger.debug("Eye mirror journaling failed: %s", e)
 
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
-        marks = self._safe_marks()
-        self._inner.on_session_end(messages)
-        try:
-            after = (
-                images.created_since(self.store, marks)
-                if marks and self.store else None
-            )
-            n_new = len(after["facts"]) if after else 0
-            self._append(
-                "auto_extract", "extract",
-                request={"message_count": len(messages or [])},
-                after=after,
-                response={"facts_extracted": n_new},
-            )
-        except Exception as e:
-            logger.debug("Eye auto-extract journaling failed: %s", e)
+        with self._operation_lock:
+            marks = self._safe_marks()
+            self._inner.on_session_end(messages)
+            try:
+                after = (
+                    images.created_since(self.store, marks)
+                    if marks and self.store else None
+                )
+                n_new = len(after["facts"]) if after else 0
+                self._append(
+                    "auto_extract", "extract",
+                    request={"message_count": len(messages or [])},
+                    after=after,
+                    response={"facts_extracted": n_new},
+                )
+            except Exception as e:
+                logger.debug("Eye auto-extract journaling failed: %s", e)
 
     def on_session_switch(self, new_session_id: str, *, parent_session_id: str = "",
                           reset: bool = False, rewound: bool = False, **kwargs) -> None:

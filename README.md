@@ -1,189 +1,160 @@
 # ⊙ The Holographic Eye
 
-<img src="docs/icon.png" width="96" align="right" alt="app icon — a CRT-beam eye ringed by scope-drawn blossoms">
+![The Field, Blossom Dark](docs/hero-blossom-dark.png)
 
-Glass cockpit for the Hermes `holographic` memory provider — watch the
-agent's memory live as its **real HRR geometry**, curate trust,
-review/undo every write, merge junk entities, back it all up, and ask
-the agent itself to revise its memory. Zero Hermes core changes.
+*Screenshot uses synthetic demonstration data, not personal memories.*
 
-![the Field, Blossom Dark](docs/hero-blossom-dark.png)
+A local glass cockpit for Hermes holographic memory. Explore the real HRR geometry,
+follow recalled facts, inspect evidence, curate trust, and review journaled changes.
+The desktop shell uses Rust and Tauri. The Field uses TypeScript and a small Zig/WebAssembly
+hit-testing kernel. The provider stays outside Hermes core.
 
-Every dot is a stored fact placed by PCA of its actual 1024-dim phase
-vector. Hue = category, vividness = trust, size = observed recalls.
-The stream at the foot is the journal, live. The flowers are flowers.
+## The cockpit
 
-## v1.0.0 — what changed
+- **Field:** real PCA coordinates, pan, zoom, selection, entity highlights, and a trust lens.
+- **Evidence bench:** Entities, Queue, and Contradictions. Open the next layer without losing the Field.
+- **Inspect:** fact anatomy, 50-step back/forward history, edit previews, trust controls, and typed-ID deletion.
+- **Stream:** a compact latest-event glance, expandable journal, and direct navigation to returned facts.
+- **Workbench:** preview the provider's recall and inspect its actual vector spectra.
+- **Appearance:** ten palette rows, Blossom Dark by default, four text sizes, and an optional pixel garden.
+- **Recovery:** explicit connection retry, guarded submissions, conditional undo, and SQLite backups.
 
-| | before | v1.0.0 |
-|---|---|---|
-| entity probe / workbench | ~4 s per click | **~40 ms** (runtime encoder memoization; results byte-identical, re-proven by the equivalence harness) |
-| chrome | one hardcoded true-black theme | **10 palette rows** (sysmon/Phosphor token system) — Blossom Dark default, the old look preserved as *Blossom AMOLED* |
-| pixel garden | tiled (symmetrical), overlaid the stream + scrollbars | grown by seeded RNG in its **own layout lane** + behind the Field — can never cover UI |
-| app icon | static SVG rings | **drawn by the Phosphor engine**: parametric WAVs traced by the CRT beam, snapshotted per color layer |
-| packaging | `.deb` only | `.deb` + `.rpm` + source tarball + SHA256SUMS, every release |
-| port hygiene | a lingering CLI could steal :8770 | control plane binds only inside `hermes gateway run`; failed binds retry |
-
-## Prerequisites (the Eye watches a living gateway)
-
-1. [Hermes](https://github.com/hermes-agent) install with the bundled
-   `holographic` memory provider working (numpy in the venv).
-2. The wrapper provider deployed and selected — see *Install the
-   provider* below.
-3. The gateway **booted** (`hermes gateway start`). The control plane
-   at `127.0.0.1:8770` boot-warms with it — up ~1 s after the gateway,
-   no agent message needed (v1.0.2, D-0015).
+The Field's Zig kernel changes hit testing, not the stored vectors or PCA.
+If WebAssembly cannot load, the same JavaScript selection algorithm remains available.
+Settings reports the active geometry engine.
 
 ## Install
 
-### 1 · the provider (into the gateway)
+The DEB/RPM installs the native shell. The provider and served interface are a separate,
+user-level installation inside Hermes. Upgrade both for the complete interface update.
+
+### Desktop package
+
+```bash
+# Debian / Ubuntu / Mint
+sudo apt install ./holographic-eye_1.1.0_amd64.deb
+
+# Fedora / RHEL
+sudo dnf install ./holographic-eye-1.1.0-1.x86_64.rpm
+
+# Verify the installed shell
+holographic-eye version --json
+holographic-eye status --json
+```
+
+Linux Mint is the tested host. RPM payload validation does not prove a Fedora runtime install.
+The package also installs the desktop entry, icons, and `man holographic-eye`.
+
+### Provider and interface
+
+Requires the Hermes holographic provider, NumPy, and a working Hermes gateway.
+The optional `threadpoolctl` package limits projection BLAS work to two threads during the SVD.
+Without it, the same SVD remains available without that performance cap.
 
 ```bash
 git clone https://github.com/RamenFast/holographic-eye.git
 cd holographic-eye
-./build/deploy.sh                      # → ~/.hermes/plugins/holographic-eye
-# config.yaml:  memory.provider: holographic-eye
-hermes gateway restart
+npm --prefix build/eye_frontend ci
+# Install the pinned Zig toolchain as described below, then:
+npm --prefix build/eye_frontend run build
+./build/deploy.sh
 ```
 
-### 2 · the desktop app (from the release assets)
+Select `memory.provider: holographic-eye` in Hermes configuration.
+Provider code changes require an idle gateway restart. Do not interrupt active conversations.
+Frontend-only changes do not require a restart. The deployment helper preserves unmanaged plugin files.
+The control plane binds to `127.0.0.1:8770` and uses `~/.hermes/eye_token`.
+
+### Build the Zig kernel and packages
+
+The compiler stays inside the project, not in the release assets.
 
 ```bash
-# Debian / Ubuntu / Mint — or just double-click the .deb
-sudo apt install ./holographic-eye_1.0.3_amd64.deb
-
-# Fedora / RHEL
-sudo dnf install ./holographic-eye-1.0.3-1.x86_64.rpm
-
-# verify
-holographic-eye --version              # → holographic-eye 1.0.3
-curl -s http://127.0.0.1:8770/health   # → {"ok": true, ... "version": "1.0.3"}
+mkdir -p build/toolchains
+curl --fail --location -o build/toolchains/zig-0.15.2.tar.xz \
+  https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+printf '%s  %s\n' \
+  02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239 \
+  build/toolchains/zig-0.15.2.tar.xz | sha256sum -c -
+tar -xJf build/toolchains/zig-0.15.2.tar.xz -C build/toolchains
+npm --prefix build/eye_frontend run build
+cd build/eye_shell/src-tauri
+cargo tauri build --bundles deb,rpm
 ```
 
-Built and installed on Linux Mint 22; the `.rpm` is `rpm --test`
-verified there — Fedora reports welcome.
-
-### from source (no packages)
-
-```bash
-cd build/eye_frontend && npm install && npm run build && cd ../..
-./build/deploy.sh                                   # provider + GUI + /holo
-cd build/eye_shell/src-tauri && cargo tauri build --bundles deb,rpm
-```
+The native build requires Rust, Tauri CLI 2, GTK3, WebKitGTK 4.1, and their development packages.
+Set `ZIG` to an existing Zig **0.15.2** executable to use another compiler location.
+Release assets include DEB, RPM, source tarball, and `SHA256SUMS`.
 
 ## Daily use
 
-| Surface | How |
-|---|---|
-| **GUI** | the desktop app, or `hermes holographic-eye gui` (tokened URL, any browser) |
-| **CLI** | `hermes holographic-eye status \| tail \| undo-last \| backup \| gui` |
-| **In chat** | `/holo [n]` — status + last n journal events |
+Launch `holographic-eye` from the desktop menu or terminal.
+Use `Ctrl+F` to find a fact, `Ctrl+R` for the Reason Workbench, and `?` for the manual.
+Inspect's Back/Forward buttons retrace single and multi-selections.
+Active entity and trust contexts can be cleared independently.
 
-Inside the GUI: the **Field** (pan/zoom/select the real geometry),
-**Entities/Queue/Contra** tabs (probe, disclose, undo, contradiction
-triage), **Inspect** (edit with server-computed preview, typed-ID
-delete, trust slider), **Reason Workbench** (`⌘R` — previews *the
-recall, not the answer*), FFT inspector, Backup Memory, ask-the-agent.
-`?` is the manual; `⚙` holds the real settings — **theme** (10 rooms),
-text size, pixel garden, projection refit, token reset.
+The Hermes extension remains available:
+`hermes holographic-eye status|tail|undo-last|backup|gui`, plus `/holo` in chat.
 
-## For agents
+## Agent interface
 
-Everything the GUI does rides one loopback API — token in
-`~/.hermes/eye_token`:
+`holographic-eye schema` describes the native CLI.
+One-shot commands emit text on a terminal and one JSON object in a pipe.
+Use `--json` to force structured output. Errors include a fix.
+`status` checks the attached control plane and token-file readability; it does not authenticate the token.
 
-```bash
-TOKEN=$(cat ~/.hermes/eye_token)
-curl -s http://127.0.0.1:8770/health                       # no auth
-curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8770/stats
-curl -s -X POST http://127.0.0.1:8770/rpc \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"method":"probe","params":{"entity":"hermes","limit":5}}'
-```
+The existing token-authenticated loopback API serves `/stats`, `/rpc`, and `/events`.
+Read methods delegate to the provider's own implementation. The GUI does not implement another retrieval engine.
+See [the interface reference](docs/AGENT-INTERFACE.md).
 
-Read methods (`search probe related reason contradict list`) return
-the **byte-exact** string the agent's own tool call would (invariant
-I6). Mutations (`fact.update`, `fact.remove`, `entity.merge`, `undo`,
-`backup.create`, …) are journaled with full before/after images and
-undoable. `WS /events?token=…` streams every journal event. Acceptance
-harnesses: `build/verify/p1_equivalence.py` + `p2_control.py` (run
-them with the hermes venv python; they copy the live DB, never touch it).
+## Memory safety and limits
 
-## Multiple sessions & windows — is the database safe?
+Tests use synthetic stores or isolated SQLite backup copies. Never run mutation tests against live memory.
+Eye edits require an available journal. Undo rejects an event when affected state has changed since that event.
+Entity operations retain affected fact images, including supported register state.
+Unknown network outcomes are not silently retried; check the journal before sending the action again.
 
-Short answer: **yes, by construction.** How it works:
+A shared operation lock serializes wrapper mutations **within one process**.
+It does not stop another process from writing. Memory and journal are separate SQLite files,
+so a crash or I/O failure between their commits can still leave an unjournaled change.
+Agent writes retain best-effort journaling rather than blocking the agent when the journal fails.
 
-- There is exactly **one provider instance**, and it lives *inside the
-  always-on gateway process*. Every chat session — Telegram, the
-  api_server, `/holo`, all of them at once — flows through that same
-  instance. The Eye isn't "active in one session"; it wraps the
-  memory itself, and journals every session's ops (each event carries
-  its `session_id`).
-- **Any number of Eye windows** (desktop app, browser tabs, another
-  machine over LAN) can watch simultaneously. Reads are stateless
-  passthroughs; mutations from any window execute inside that one
-  gateway process, through the provider's own store API, serialized
-  on its single connection — and each one lands in the journal with a
-  full before/after image, so anything can be undone (I3/I4).
-- Separate CLI processes (`hermes holographic-eye status`,
-  `hermes memory status`) open their **own** SQLite connections. Both
-  databases run in **WAL mode**, which exists precisely so multiple
-  processes can read while one writes — with busy timeouts, not
-  corruption. (These transient processes also never bind the control
-  plane port; only the gateway does.)
-- The **one forbidden move** is restoring a backup over a *live* WAL
-  database — which is why restore is documented as a cold operation
-  below. Nothing in normal use — however many sessions, windows, or
-  CLIs — can hurt `memory_store.db`.
+Backups use SQLite's backup API. Their manifest counts come from the snapshot files.
+A running backup has an in-process boundary, not a cross-process guarantee.
+For a guaranteed quiescent pair, stop every writer during a maintenance window.
+Restore is cold-only. Preserve the current databases and WAL/SHM sidecars first;
+never copy a backup over a live WAL database or discard newer valid memory during a code rollback.
 
-## Backup & restore
-
-`backup` (GUI modal or CLI) snapshots `memory_store.db` +
-`eye_journal.db` via the sqlite backup API (consistent while live) to
-Mass storage (fallback `~/.hermes/backups/holographic-eye/`), with a
-manifest. **Restore is deliberately cold** — never hot-swap a WAL db:
+## Verification
 
 ```bash
-hermes gateway stop
-cp <backup>/memory_store.db <backup>/eye_journal.db ~/.hermes/
-hermes gateway start
+npm --prefix build/eye_frontend run check
+npm --prefix build/verify ci
+node build/verify/gui_edge.cjs
+node build/verify/perf_frontend.cjs
+node build/eye_geometry/test.mjs
 ```
+
+Provider checks use Hermes' supported interpreter:
+`build/verify/test_backend_edges.py`, `p1_equivalence.py`, `p2_control.py`, and `test_bootwarm.py`.
+Inspect each harness before running it against a different installation.
+Synthetic browser benchmarks are not native WebKitGTK performance claims.
 
 ## Honest ledger
 
-- **Quarantine mode (Q5)** — specced, deliberately not built until
-  journal-mode curation proves insufficient.
-- **UMAP projector** — PCA only; UMAP remains an unbuilt opt-in.
-- **`retrieval_count`** — the upstream fork never increments it; the
-  Eye shows journal-observed counts and labels them as such.
-- **Live restore** — cold-only, on purpose (WAL corruption risk).
-- **The `.deb`/`.rpm` install the desktop shell**; the provider itself
-  is user-level (`./build/deploy.sh`) because it must live inside
-  `~/.hermes`. Both are versioned together.
-- Desktop shell is a thin pane of glass: if the gateway is down, the
-  window shows the connect error — that is the intended honesty.
+- Quarantine mode and UMAP remain deliberately unbuilt.
+- Retrieval counts are journal-observed, not upstream lifetime counts.
+- Live restore is not supported.
+- The desktop shell and the user-level provider are separate installation steps.
+- Cross-process and cross-database crash atomicity are not claimed.
+- A missing Zig compiler blocks a source build. A missing or unsupported WASM runtime uses the tested JavaScript fallback.
 
-## Repo map
+## Source and license
 
-```
-PLAN.md        ← the source (🫀 vision + 🧠 spec + decision log) — code compiles FROM this
-HANDOFF.md     ← where we are + what's next
-build/         ← compiled artifacts: eye_provider (Python), eye_frontend (TS),
-                 eye_shell (Tauri), eye_commands (/holo), eye_icons, verify/
-docs/          ← screenshots · docs/dev/ (planning history, feedback rounds)
-```
+`PLAN.md` contains the vision, contracts, and decisions. `build/` contains their implementation.
+`HANDOFF.md` records the installed/release state. Verification receipts and feedback live in `docs/dev/`.
 
-## Gallery
+[GPLv3](LICENSE). Fonts are system-resolved. The scope-drawn icon uses
+[Phosphor](https://github.com/RamenFast).
 
-| Blossom AMOLED (the v3 look) | Paper | Chromacore |
-|---|---|---|
-| ![amoled](docs/theme-amoled.png) | ![paper](docs/theme-paper.png) | ![chromacore](docs/theme-chromacore.png) |
-
-## License & credits
-
-[GPLv3](LICENSE). Fonts named in `styles.css` are system-resolved
-(none bundled). App icon beams traced by
-[Phosphor](https://github.com/RamenFast) — Ben's CRT oscilloscope.
-
-*Compiled from PLAN.md by Claude (Fable 5) with Ben, 2026-07-02 →
-2026-07-07 — with love for the math.* ⊙
+*Built with Ben. Original implementation: Claude (Fable 5). This refinement: Prime and GPT workers.*

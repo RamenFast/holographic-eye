@@ -273,7 +273,7 @@ class EyeControlPlane:
 def _make_handler(plane: EyeControlPlane):
     class EyeHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-        server_version = "HolographicEye/1.0.3"
+        server_version = "HolographicEye/1.1.0"
 
         def log_message(self, fmt, *args):
             logger.debug("eye-http: " + fmt, *args)

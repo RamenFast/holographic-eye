@@ -9,6 +9,7 @@
    Idle cost target: <1% CPU. GPLv3 — see LICENSE. */
 
 import { store, catColor, fid, Fact, theme, rgba } from "./state";
+import { GeometryHitTester, type GeometryStatus } from "./geometry";
 
 interface Effect {
   kind: "arrival" | "ripple" | "bankpulse" | "trust";
@@ -45,6 +46,7 @@ export class Field {
   private bounds = { minX: -1, maxX: 1, minY: -1, maxY: 1 };
   private rafPending = false;
   private tooltipTimer: number | undefined;
+  private geometry = new GeometryHitTester();
 
   constructor(container: HTMLElement) {
     this.canvas = container.querySelector("canvas.fieldc")!;
@@ -52,7 +54,12 @@ export class Field {
     this.tooltip = container.querySelector<HTMLElement>(".tooltip")!;
     this.mathLog = container.querySelector<HTMLElement>(".mathlog")!;
     this.bindInput();
-    store.on("facts", () => { this.computeBounds(); this.requestDraw(); });
+    this.geometry.sync(store.facts.values());
+    store.on("facts", () => {
+      this.geometry.sync(store.facts.values());
+      this.computeBounds();
+      this.requestDraw();
+    });
     store.on("selection", () => this.requestDraw());
     store.on("entities", () => this.requestDraw());   // entity highlight lives here
     store.on("trustlens", () => this.requestDraw());
@@ -116,6 +123,8 @@ export class Field {
   }
 
   resetCamera(): void { this.fit(); }
+
+  geometryStatus(): Readonly<GeometryStatus> { return this.geometry.status(); }
 
   // -- data-change effects (called from main on WS events) ---------------------
 
@@ -261,13 +270,12 @@ export class Field {
   }
 
   private hitTest(sx: number, sy: number): number | null {
-    let best: number | null = null, bestD = 100; // 10px radius
-    for (const f of store.facts.values()) {
-      if (f.x === null) continue;
-      const [px, py] = this.toScreen(f.x, f.y!);
-      const d = (px - sx) ** 2 + (py - sy) ** 2;
-      if (d < bestD) { bestD = d; best = f.fact_id; }
-    }
+    // One viewport read and eight scalar arguments cross into WASM. The
+    // interleaved coordinate buffer changes only when the facts change.
+    const { w, h } = this.view();
+    const best = this.geometry.hitTest(
+      this.cx, this.cy, this.scale, w, h, sx, sy,
+    );
     if (best === null) {
       for (const s of this.stripHits) {
         if ((s.x - sx) ** 2 + (s.y - sy) ** 2 < 49) return s.id;
@@ -296,6 +304,11 @@ export class Field {
     for (let y = 80; y < h; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
 
     const now = performance.now();
+    // Keep one stable viewport snapshot for this frame. Calling toScreen()
+    // for every point would read layout N times through view().
+    const screen = (wx: number, wy: number): [number, number] =>
+      [(wx - this.cx) * this.scale + w / 2,
+       (wy - this.cy) * this.scale + h / 2];
     const highlightOn = store.entityHighlight.size > 0;
     const halo = store.reasonHalo;
 
@@ -304,7 +317,7 @@ export class Field {
       if (e.kind !== "bankpulse") continue;
       const t = (now - e.start) / e.duration;
       if (t < 0 || t > 1) continue;
-      const [sx, sy] = this.toScreen(e.x, e.y);
+      const [sx, sy] = screen(e.x, e.y);
       ctx.beginPath();
       ctx.arc(sx, sy, 30 + t * 160, 0, Math.PI * 2);
       ctx.strokeStyle = rgba(theme.numericsRgb, 0.08 * (1 - t));
@@ -335,7 +348,7 @@ export class Field {
     // dots
     for (const f of store.facts.values()) {
       if (f.x === null) continue;
-      const [sx, sy] = this.toScreen(f.x, f.y!);
+      const [sx, sy] = screen(f.x, f.y!);
       if (sx < -20 || sy < -20 || sx > w + 20 || sy > h + 20) continue;
       let alpha = 0.55 + f.trust_score * 0.45;
       if (highlightOn && !store.entityHighlight.has(f.fact_id)) alpha *= 0.12;
@@ -384,7 +397,7 @@ export class Field {
       if (e.kind !== "ripple") continue;
       const t = (now - e.start) / e.duration;
       if (t < 0 || t > 1) continue;
-      const [sx, sy] = this.toScreen(e.x, e.y);
+      const [sx, sy] = screen(e.x, e.y);
       ctx.beginPath();
       ctx.arc(sx, sy, 2 + t * 38, 0, Math.PI * 2);
       ctx.strokeStyle = rgba(theme.numericsRgb, 0.4 * (1 - t));
@@ -401,7 +414,7 @@ export class Field {
           }
         }
         if (!n) continue;
-        const [px, py] = this.toScreen(sx / n, sy / n);
+        const [px, py] = screen(sx / n, sy / n);
         const breathe = reducedMotion ? 1 : 0.6 + 0.4 * Math.abs(Math.sin(now / 1200 * Math.PI));
         ctx.beginPath(); ctx.arc(px, py, 16 * breathe + 8, 0, Math.PI * 2);
         ctx.strokeStyle = rgba(theme.numericsRgb, 0.55); ctx.lineWidth = 1.5; ctx.stroke();

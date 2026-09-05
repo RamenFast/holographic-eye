@@ -23,6 +23,12 @@ _FACT_COLS = (
 )
 
 
+def _has_table(store, name: str) -> bool:
+    return store._conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone() is not None
+
+
 def fact_image(store, fact_id: int) -> Optional[Dict[str, Any]]:
     """Full image of one fact: row (vector as b64) + entity links."""
     row = store._conn.execute(
@@ -38,10 +44,16 @@ def fact_image(store, fact_id: int) -> Optional[Dict[str, Any]]:
         SELECT fe.entity_id, e.name FROM fact_entities fe
         JOIN entities e ON e.entity_id = fe.entity_id
         WHERE fe.fact_id = ?
+        ORDER BY fe.entity_id
         """,
         (fact_id,),
     ).fetchall()
     fact["links"] = [{"entity_id": r["entity_id"], "name": r["name"]} for r in links]
+    if _has_table(store, "fact_register"):
+        register = store._conn.execute(
+            "SELECT * FROM fact_register WHERE fact_id = ?", (fact_id,)
+        ).fetchone()
+        fact["register"] = dict(register) if register else None
     return fact
 
 
@@ -63,7 +75,7 @@ def entity_image(store, entity_id: int) -> Optional[Dict[str, Any]]:
     ent["fact_ids"] = [
         r["fact_id"]
         for r in store._conn.execute(
-            "SELECT fact_id FROM fact_entities WHERE entity_id = ?", (entity_id,)
+            "SELECT fact_id FROM fact_entities WHERE entity_id = ? ORDER BY fact_id", (entity_id,)
         ).fetchall()
     ]
     return ent
@@ -144,12 +156,25 @@ def restore_fact(store, image: Dict[str, Any]) -> None:
         )
     store._conn.execute("DELETE FROM fact_entities WHERE fact_id = ?", (image["fact_id"],))
     _restore_links(store, image["fact_id"], image.get("links", []))
+    if _has_table(store, "fact_register") and "register" in image:
+        store._conn.execute("DELETE FROM fact_register WHERE fact_id = ?", (image["fact_id"],))
+        register = image.get("register")
+        if register:
+            columns = list(register)
+            quoted = ", ".join(f'"{column}"' for column in columns)
+            placeholders = ", ".join("?" for _ in columns)
+            store._conn.execute(
+                f"INSERT INTO fact_register ({quoted}) VALUES ({placeholders})",
+                [register[column] for column in columns],
+            )
     store._conn.commit()
 
 
 def delete_fact_raw(store, fact_id: int) -> None:
     """Remove a fact + links without touching banks (caller rebuilds)."""
     store._conn.execute("DELETE FROM fact_entities WHERE fact_id = ?", (fact_id,))
+    if _has_table(store, "fact_register"):
+        store._conn.execute("DELETE FROM fact_register WHERE fact_id = ?", (fact_id,))
     store._conn.execute("DELETE FROM facts WHERE fact_id = ?", (fact_id,))
     store._conn.commit()
 
@@ -188,6 +213,9 @@ def restore_entity(store, image: Dict[str, Any]) -> None:
             (image["entity_id"], image["name"], image.get("entity_type", "unknown"),
              image.get("aliases", ""), image.get("created_at")),
         )
+    store._conn.execute(
+        "DELETE FROM fact_entities WHERE entity_id = ?", (image["entity_id"],)
+    )
     for fid in image.get("fact_ids", []):
         if store._conn.execute("SELECT 1 FROM facts WHERE fact_id = ?", (fid,)).fetchone():
             store._conn.execute(
