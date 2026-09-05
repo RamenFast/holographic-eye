@@ -1,5 +1,13 @@
 # compiled/vendored artifacts — everything here regenerates from PLAN.md
 build/eye_frontend/node_modules/
+build/verify/node_modules/
+build/toolchains/
+build/eye_geometry/.zig-cache/
+build/eye_geometry/zig-out/
+build/verify/shots/
+packaging/dist/
+# Private run coordination; public contracts remain beside it.
+docs/dev/2026-09-05/CHECKPOINT.md
 build/eye_frontend/dist/
 build/eye_shell/src-tauri/target/
 build/eye_shell/src-tauri/gen/

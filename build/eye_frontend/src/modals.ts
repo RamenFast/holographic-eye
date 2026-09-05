@@ -3,6 +3,7 @@
    GPLv3 — see LICENSE. */
 
 import { rpc } from "./api";
+import { getStored, setStored } from "./storage";
 import { store, fid, CAT_HUES, catColor, THEMES, theme, applyTheme,
          rgba } from "./state";
 import { regrowGarden } from "./garden";
@@ -11,28 +12,83 @@ import { escapeHtml } from "./field";
 let fieldRef: any = null;
 export function setField(f: any): void { fieldRef = f; }
 
+let activeModalClose: (() => void) | null = null;
+let modalSerial = 0;
+const modalClosers = new WeakMap<HTMLElement, () => void>();
+
+function closeModal(back: HTMLElement): void {
+  modalClosers.get(back)?.();
+}
+
+function modalIsOpen(back: HTMLElement): boolean {
+  return document.contains(back) && modalClosers.has(back);
+}
+
 function modal(title: string, body: string, width = 720): HTMLElement {
-  document.querySelector(".modal-back")?.remove();
+  activeModalClose?.();
+  const priorFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement : null;
   const back = document.createElement("div");
+  const titleId = `eye-modal-title-${++modalSerial}`;
   back.className = "modal-back";
-  back.innerHTML = `<div class="modal" style="width:${width}px">
-    <div class="m-title">${title}<span class="m-close">esc ✕</span></div>
+  back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="${titleId}" tabindex="-1" style="width:${width}px">
+    <div class="m-title" id="${titleId}">${title}<button type="button" class="m-close" aria-label="Close dialog" style="background:none;border:0;font:inherit;padding:0">esc ✕</button></div>
     <div class="m-body">${body}</div></div>`;
   document.body.appendChild(back);
+
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
+    removeEventListener("keydown", onKeydown);
+    modalClosers.delete(back);
+    if (activeModalClose === close) activeModalClose = null;
+    back.dispatchEvent(new Event("eye:close"));
     back.remove();
     if (store.reasonHalo) {
       store.reasonHalo = null;
       store.emit("halo");
       fieldRef?.logMath([]);
     }
+    if (priorFocus && document.contains(priorFocus)) priorFocus.focus();
   };
+  const focusable = () => [...back.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+  )].filter((el) => !el.hasAttribute("hidden"));
+  const onKeydown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const items = focusable();
+    if (!items.length) {
+      event.preventDefault();
+      (back.querySelector<HTMLElement>(".modal")!).focus();
+      return;
+    }
+    const first = items[0], last = items[items.length - 1];
+    if (!back.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault(); first.focus();
+    }
+  };
+  modalClosers.set(back, close);
+  activeModalClose = close;
   back.querySelector<HTMLElement>(".m-close")!.onclick = close;
-  back.onclick = (e) => { if (e.target === back) close(); };
-  const esc = (e: KeyboardEvent) => {
-    if (e.key === "Escape") { close(); removeEventListener("keydown", esc); }
-  };
-  addEventListener("keydown", esc);
+  back.onclick = (event) => { if (event.target === back) close(); };
+  addEventListener("keydown", onKeydown);
+  queueMicrotask(() => {
+    if (!modalIsOpen(back)) return;
+    const preferred = back.querySelector<HTMLElement>("input:not([type=range]), textarea, select, button.commit");
+    (preferred ?? focusable()[0] ?? back.querySelector<HTMLElement>(".modal"))?.focus();
+  });
   return back;
 }
 
@@ -55,8 +111,11 @@ what the agent WOULD have been handed for these entities.</pre>
   const q = (s: string) => back.querySelector<HTMLElement>(s)!;
   // null = no run yet / computing — never show "nothing" until results exist
   let results: any[] | null = null;
+  let requestId = 0;
+  back.addEventListener("eye:close", () => { requestId++; }, { once: true });
 
   const render = () => {
+    if (!modalIsOpen(back)) return;
     const th = Number((q("#wb-slider") as HTMLInputElement).value);
     q("#wb-tval").textContent = th.toFixed(2);
     if (results === null) return;
@@ -83,15 +142,23 @@ what the agent WOULD have been handed for these entities.</pre>
   };
 
   const run = async () => {
+    if (!modalIsOpen(back)) return;
     const entities = (q("#wb-entities") as HTMLInputElement).value
       .split(",").map((s) => s.trim()).filter(Boolean);
     if (!entities.length) return;
+    const mine = ++requestId;
+    const runButton = q("#wb-run") as HTMLButtonElement;
+    runButton.disabled = true;
     results = null;
     q("#wb-math").textContent = "running the provider's reason() …";
     q("#wb-results").innerHTML =
       `<div class="pane-hint">⊙ computing — unbinding ${entities.length} probe key(s) across the store…</div>`;
     try {
       const res = await rpc("reason.explain", { entities, limit: 20 });
+      if (!modalIsOpen(back) || mine !== requestId) return;
+      if (!Array.isArray(res.results) || !Array.isArray(res.math)) {
+        throw new Error("reason.explain returned malformed results. Check the gateway log, then retry.");
+      }
       results = res.results;
       q("#wb-math").textContent = res.math.join("\n");
       store.reasonHalo = { entities, factIds: new Set() };
@@ -99,12 +166,17 @@ what the agent WOULD have been handed for these entities.</pre>
       fieldRef?.logMath(res.math);
       render();
     } catch (err: any) {
-      q("#wb-math").textContent = String(err.message);
+      if (!modalIsOpen(back) || mine !== requestId) return;
+      q("#wb-math").textContent = String(err?.message ?? err);
       q("#wb-results").innerHTML = "";
+    } finally {
+      if (modalIsOpen(back) && mine === requestId) runButton.disabled = false;
     }
   };
   q("#wb-run").onclick = run;
-  (q("#wb-entities") as HTMLInputElement).onkeydown = (e) => { if (e.key === "Enter") run(); };
+  (q("#wb-entities") as HTMLInputElement).onkeydown = (e) => {
+    if (e.key === "Enter" && !(q("#wb-run") as HTMLButtonElement).disabled) void run();
+  };
   (q("#wb-slider") as HTMLInputElement).oninput = render;
   if (initial.length) run();
 }
@@ -128,88 +200,135 @@ export async function openFft(factId: number, fact: any): Promise<void> {
     pattern of the bound components. real math, real data, real plot.</div>`, 700);
   const q = (s: string) => back.querySelector<HTMLElement>(s)!;
 
+  let requestId = 0;
+  back.addEventListener("eye:close", () => { requestId++; }, { once: true });
   const draw = async () => {
+    if (!modalIsOpen(back)) return;
+    const mine = ++requestId;
     const boxes = [...back.querySelectorAll<HTMLInputElement>("#fft-toggles input")];
     const wantFact = boxes.find((b) => b.dataset.t === "fact")!.checked;
     const ents = boxes.filter((b) => b.dataset.t === "ent" && b.checked).map((b) => b.dataset.name!);
     const banks = boxes.find((b) => b.dataset.t === "bank")!.checked ? [fact.category] : [];
     const params: any = { entities: ents, banks };
     if (wantFact) params.fact_id = factId;
-    if (!wantFact && !ents.length && !banks.length) return;
-    const res = await rpc("fact.spectrum", params);
-    const canvas = q("#fft-canvas") as HTMLCanvasElement;
-    const ctx = canvas.getContext("2d")!;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const colors: Record<string, string> = {
-      fact: catColor(fact.category, 0.9),
-      entity: theme.acting,
-      bank: rgba(theme.numericsRgb, 0.55),
-    };
-    const W = canvas.width, H = canvas.height - 18;
-    ctx.strokeStyle = rgba(theme.inkRgb, 0.12);
-    ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
-    let legend = "";
-    for (const trace of res.traces) {
-      const bins: number[] = trace.bins;
-      ctx.beginPath();
-      for (let x = 0; x < W; x++) {
-        const i = Math.floor((x / W) * bins.length);
-        const y = H - bins[i] * (H - 8) - 4;
-        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    if (!wantFact && !ents.length && !banks.length) {
+      const canvas = q("#fft-canvas") as HTMLCanvasElement;
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      q("#fft-legend").textContent = "select at least one trace";
+      q("#fft-comp").textContent = "";
+      return;
+    }
+    q("#fft-comp").textContent = "loading spectrum…";
+    try {
+      const res = await rpc("fact.spectrum", params);
+      if (!modalIsOpen(back) || mine !== requestId) return;
+      if (!Array.isArray(res.traces)) {
+        throw new Error("fact.spectrum returned malformed traces. Check the gateway log, then retry.");
       }
-      ctx.strokeStyle = colors[trace.kind] ?? theme.textDim;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      legend += `<span style="color:${colors[trace.kind]}">■</span> ${escapeHtml(trace.label)} &nbsp;`;
-    }
-    ctx.fillStyle = theme.textDim; ctx.font = "10px ui-monospace, monospace";
-    for (const bin of [0, 256, 512, 768, 1023]) {
-      ctx.fillText(String(bin), (bin / 1023) * (W - 30), canvas.height - 4);
-    }
-    q("#fft-legend").innerHTML = legend;
-    if (res.composition?.length) {
-      q("#fft-comp").textContent = "composition:\n" + res.composition.map((c: any) =>
-        `  ${c.component}   (peak at bin ${c.peak_bin})`).join("\n");
+      const canvas = q("#fft-canvas") as HTMLCanvasElement;
+      const ctx = canvas.getContext("2d")!;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const colors: Record<string, string> = {
+        fact: catColor(fact.category, 0.9),
+        entity: theme.acting,
+        bank: rgba(theme.numericsRgb, 0.55),
+      };
+      const W = canvas.width, H = canvas.height - 18;
+      ctx.strokeStyle = rgba(theme.inkRgb, 0.12);
+      ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+      let legend = "";
+      for (const trace of res.traces) {
+        const bins: number[] = Array.isArray(trace.bins) ? trace.bins : [];
+        if (!bins.length) continue;
+        ctx.beginPath();
+        for (let x = 0; x < W; x++) {
+          const i = Math.min(bins.length - 1, Math.floor((x / W) * bins.length));
+          const y = H - Number(bins[i] || 0) * (H - 8) - 4;
+          x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = colors[trace.kind] ?? theme.textDim;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        legend += `<span style="color:${colors[trace.kind]}">■</span> ${escapeHtml(String(trace.label ?? "?"))} &nbsp;`;
+      }
+      ctx.fillStyle = theme.textDim; ctx.font = "10px ui-monospace, monospace";
+      for (const bin of [0, 256, 512, 768, 1023]) {
+        ctx.fillText(String(bin), (bin / 1023) * (W - 30), canvas.height - 4);
+      }
+      q("#fft-legend").innerHTML = legend;
+      q("#fft-comp").textContent = res.composition?.length
+        ? "composition:\n" + res.composition.map((c: any) =>
+          `  ${c.component}   (peak at bin ${c.peak_bin})`).join("\n")
+        : "";
+    } catch (err: any) {
+      if (!modalIsOpen(back) || mine !== requestId) return;
+      q("#fft-comp").textContent = String(err?.message ?? err);
     }
   };
   back.querySelectorAll("#fft-toggles input").forEach((b) =>
     (b as HTMLInputElement).onchange = draw);
-  draw();
+  void draw();
 }
 
 // ---------------------------------------------------------------------------
 // Edit preview (§7.2) — server-computed impact, then commit
 // ---------------------------------------------------------------------------
 
+let editPreviewRequest = 0;
 export async function openEditPreview(factId: number, changes: any): Promise<void> {
+  const mine = ++editPreviewRequest;
+  const modalAtRequest = modalSerial;
   let pv: any;
   try {
     pv = await rpc("fact.preview_update", { fact_id: factId, ...changes });
-  } catch (err: any) { alert(err.message); return; }
+  } catch (err: any) {
+    if (mine === editPreviewRequest) alert(String(err?.message ?? err));
+    return;
+  }
+  if (mine !== editPreviewRequest || modalSerial !== modalAtRequest) return;
+  if (!pv?.before || !pv?.after || typeof pv.before.content !== "string" ||
+      typeof pv.after.content !== "string" || !Array.isArray(pv.predicted_entities) ||
+      !Array.isArray(pv.entities_removed) || !Array.isArray(pv.bank_impact)) {
+    alert("fact.preview_update returned malformed data. Check the gateway log, then retry.");
+    return;
+  }
   const ents = pv.predicted_entities.map((p: any) =>
-    `${escapeHtml(p.name)}${p.exists ? "" : " (new)"}`).join(", ") || "none";
+    `${escapeHtml(String(p?.name ?? "?"))}${p?.exists ? "" : " (new)"}`).join(", ") || "none";
   const removed = pv.entities_removed.length
-    ? `<div class="q-body dim">removed: ${pv.entities_removed.map(escapeHtml).join(", ")}</div>` : "";
+    ? `<div class="q-body dim">removed: ${pv.entities_removed.map((name: unknown) => escapeHtml(String(name))).join(", ")}</div>` : "";
   const banks = pv.bank_impact.map((b: any) =>
-    `${escapeHtml(b.bank)} · ${b.fact_count} facts · rebuilding`).join(" &nbsp;·&nbsp; ");
+    `${escapeHtml(String(b?.bank ?? "?"))} · ${Number(b?.fact_count) || 0} facts · rebuilding`).join(" &nbsp;·&nbsp; ");
   const back = modal(`COMMIT EDIT · ${fid(factId)}`, `
     <div class="ep-label">before</div>
     <pre class="ep-block">${escapeHtml(pv.before.content)}</pre>
     <div class="ep-label">after</div>
     <pre class="ep-block ep-after">${escapeHtml(pv.after.content)}</pre>
-    ${changes.category ? `<div class="q-body">category: ${escapeHtml(pv.before.category)} → <b>${escapeHtml(pv.after.category)}</b></div>` : ""}
-    ${changes.tags !== undefined ? `<div class="q-body">tags: ${escapeHtml(pv.after.tags)}</div>` : ""}
+    ${changes.category ? `<div class="q-body">category: ${escapeHtml(String(pv.before.category))} → <b>${escapeHtml(String(pv.after.category))}</b></div>` : ""}
+    ${changes.tags !== undefined ? `<div class="q-body">tags: ${escapeHtml(String(pv.after.tags ?? ""))}</div>` : ""}
     <div class="q-body">predicted entities: ${ents}</div>${removed}
     <div class="q-body dim">bank impact: ${banks}</div>
-    <div class="m-actions"><button class="btn" id="ep-cancel">cancel</button>
-      <button class="btn commit" id="ep-commit">commit</button></div>`, 620);
-  back.querySelector<HTMLElement>("#ep-cancel")!.onclick = () => back.remove();
+    <div class="q-body dim" id="ep-status" role="status"></div>
+    <div class="m-actions"><button type="button" class="btn" id="ep-cancel">cancel</button>
+      <button type="button" class="btn commit" id="ep-commit">commit</button></div>`, 620);
+  back.querySelector<HTMLElement>("#ep-cancel")!.onclick = () => closeModal(back);
   back.querySelector<HTMLElement>("#ep-commit")!.onclick = async () => {
+    const button = back.querySelector<HTMLButtonElement>("#ep-commit")!;
+    const status = back.querySelector<HTMLElement>("#ep-status")!;
+    if (button.disabled) return;
+    button.disabled = true;
+    button.textContent = "committing…";
+    status.textContent = "Waiting for the journaled update.";
     try {
       await rpc("fact.update", { fact_id: factId, ...changes });
-      back.remove();
-      (window as any).eyeRefresh();
-    } catch (err: any) { alert(err.message); }
+      if (!modalIsOpen(back)) return;
+      closeModal(back);
+      await (window as any).eyeRefresh();
+    } catch (err: any) {
+      if (!modalIsOpen(back)) return;
+      status.textContent = String(err?.message ?? err);
+      button.textContent = err?.outcome === "unknown" ? "outcome unknown" : "commit";
+      button.disabled = err?.outcome === "unknown";
+    }
   };
 }
 
@@ -226,20 +345,32 @@ export function openDeleteModal(factId: number, fact: any): void {
     <div class="q-body dim">bank cat:${escapeHtml(fact.category)} will be rebuilt · undo stays available in the queue</div>
     <div class="q-body">type <b class="v">${idStr}</b> to confirm:
       <input id="del-confirm" class="del-input" maxlength="${idStr.length + 2}" autocomplete="off"></div>
-    <div class="m-actions"><button class="btn" id="del-cancel">cancel</button>
-      <button class="btn del" id="del-go" disabled>delete</button></div>`, 480);
+    <div class="q-body dim" id="del-status" role="status"></div>
+    <div class="m-actions"><button type="button" class="btn" id="del-cancel">cancel</button>
+      <button type="button" class="btn del" id="del-go" disabled>delete</button></div>`, 480);
   const input = back.querySelector<HTMLInputElement>("#del-confirm")!;
   const go = back.querySelector<HTMLButtonElement>("#del-go")!;
+  const status = back.querySelector<HTMLElement>("#del-status")!;
   input.focus();
   input.oninput = () => { go.disabled = input.value.trim() !== idStr; };
-  back.querySelector<HTMLElement>("#del-cancel")!.onclick = () => back.remove();
+  back.querySelector<HTMLElement>("#del-cancel")!.onclick = () => closeModal(back);
   go.onclick = async () => {
+    if (go.disabled) return;
+    go.disabled = true;
+    go.textContent = "deleting…";
+    status.textContent = "Waiting for the journaled delete.";
     try {
       await rpc("fact.remove", { fact_id: factId });
-      back.remove();
+      if (!modalIsOpen(back)) return;
+      closeModal(back);
       store.clearSelection();
-      (window as any).eyeRefresh();
-    } catch (err: any) { alert(err.message); }
+      await (window as any).eyeRefresh();
+    } catch (err: any) {
+      if (!modalIsOpen(back)) return;
+      status.textContent = String(err?.message ?? err);
+      go.textContent = err?.outcome === "unknown" ? "outcome unknown" : "delete";
+      go.disabled = err?.outcome === "unknown" || input.value.trim() !== idStr;
+    }
   };
 }
 
@@ -256,45 +387,71 @@ export async function openBackup(): Promise<void> {
     <div class="q-body">destination:
       <input id="bk-dest" class="bk-input" spellcheck="false"></div>
     <div class="q-body">label (optional): <input id="bk-label" class="bk-input" placeholder="e.g. pre-cleanup"></div>
-    <div class="m-actions"><button class="btn commit" id="bk-create">create backup</button></div>
+    <div class="q-body dim" id="bk-status" role="status"></div>
+    <div class="m-actions"><button type="button" class="btn commit" id="bk-create">create backup</button></div>
     <div class="ep-label">existing backups</div>
     <div id="bk-list" class="q-list" style="max-height:200px;overflow:auto">…</div>`, 640);
   const q = (s: string) => back.querySelector<HTMLElement>(s)!;
+  let refreshId = 0;
+  back.addEventListener("eye:close", () => { refreshId++; }, { once: true });
 
   const refresh = async () => {
-    const res = await rpc("backup.list", {});
-    const dest = q("#bk-dest") as HTMLInputElement;
-    if (!dest.value) dest.value = res.default_dest;
-    q("#bk-dests").innerHTML = "presets: " + res.known_dests.map((d: string) =>
-      `<a class="bk-preset" data-d="${escapeHtml(d)}">${escapeHtml(d.includes("Mass storage") ? "🗄 Mass storage" : "~/.hermes/backups")}</a>`
-    ).join(" · ") + (res.mass_storage_mounted ? "" :
-      ' <span class="warn">(mass storage not mounted)</span>');
-    back.querySelectorAll<HTMLElement>(".bk-preset").forEach((a) => {
-      a.onclick = () => { dest.value = a.dataset.d!; };
-    });
-    q("#bk-list").innerHTML = res.backups.length ? res.backups.map((b: any) => `
-      <div class="q-row"><div class="q-head"><span class="q-kind">${escapeHtml(b.name)}</span>
-        <span class="q-fid">${b.facts ?? "?"} facts</span></div>
-        <div class="q-body dim">${escapeHtml(b.path)} · ${(b.bytes / 1048576).toFixed(1)} MB</div></div>`).join("")
-      : '<div class="pane-hint">no backups yet</div>';
+    const mine = ++refreshId;
+    try {
+      const res = await rpc("backup.list", {});
+      if (!modalIsOpen(back) || mine !== refreshId) return;
+      if (!Array.isArray(res.known_dests) || !Array.isArray(res.backups)) {
+        throw new Error("backup.list returned malformed data. Check the gateway log, then retry.");
+      }
+      const dest = q("#bk-dest") as HTMLInputElement;
+      if (!dest.value) dest.value = String(res.default_dest ?? "");
+      q("#bk-dests").innerHTML = "presets: " + res.known_dests.map((value: unknown) => {
+        const d = String(value);
+        return `<button type="button" class="btn bk-preset" data-d="${escapeHtml(d)}">${escapeHtml(d.includes("Mass storage") ? "🗄 Mass storage" : "~/.hermes/backups")}</button>`;
+      }).join(" · ") + (res.mass_storage_mounted ? "" :
+        ' <span class="warn">(mass storage not mounted)</span>');
+      back.querySelectorAll<HTMLElement>(".bk-preset").forEach((button) => {
+        button.onclick = () => { dest.value = button.dataset.d!; };
+      });
+      q("#bk-list").innerHTML = res.backups.length ? res.backups.map((b: any) => `
+        <div class="q-row"><div class="q-head"><span class="q-kind">${escapeHtml(String(b.name ?? "?"))}</span>
+          <span class="q-fid">${b.facts ?? "?"} facts</span></div>
+          <div class="q-body dim">${escapeHtml(String(b.path ?? "?"))} · ${(Number(b.bytes) / 1048576).toFixed(1)} MB</div></div>`).join("")
+        : '<div class="pane-hint">no backups yet</div>';
+    } catch (err: any) {
+      if (!modalIsOpen(back) || mine !== refreshId) return;
+      q("#bk-dests").textContent = String(err?.message ?? err);
+      q("#bk-list").innerHTML = "";
+    }
   };
   q("#bk-create").onclick = async () => {
     const btn = q("#bk-create") as HTMLButtonElement;
-    btn.disabled = true; btn.textContent = "backing up…";
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "backing up…";
+    q("#bk-status").textContent = "Waiting for the snapshot manifest.";
     try {
       const res = await rpc("backup.create", {
         dest_dir: (q("#bk-dest") as HTMLInputElement).value.trim(),
         label: (q("#bk-label") as HTMLInputElement).value.trim(),
       });
-      btn.textContent = `✓ ${res.manifest.facts} facts backed up`;
+      if (!modalIsOpen(back)) return;
+      btn.textContent = `✓ ${res.manifest?.facts ?? "?"} facts backed up`;
+      q("#bk-status").textContent = "Backup completed.";
       await refresh();
-      setTimeout(() => { btn.disabled = false; btn.textContent = "create backup"; }, 2500);
+      window.setTimeout(() => {
+        if (!modalIsOpen(back)) return;
+        btn.disabled = false;
+        btn.textContent = "create backup";
+      }, 2500);
     } catch (err: any) {
-      btn.disabled = false; btn.textContent = "create backup";
-      alert(err.message);
+      if (!modalIsOpen(back)) return;
+      q("#bk-status").textContent = String(err?.message ?? err);
+      btn.textContent = err?.outcome === "unknown" ? "outcome unknown" : "create backup";
+      btn.disabled = err?.outcome === "unknown";
     }
   };
-  refresh();
+  void refresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -310,64 +467,105 @@ export function openAskAgent(sel: number[]): void {
       agent session via the gateway api_server. the agent's mutations flow back through the
       stream and queue.</div>
     <div class="q-body ask-target">
-      <span class="k">lands in session:</span>
+      <label class="k" for="ask-session">lands in session:</label>
       <select id="ask-session"><option value="eye-console">eye-console (the Eye's own session)</option></select>
       <span class="q-fid" id="ask-eye-session" title="the session the wrapper provider is currently attached to inside the gateway"></span>
     </div>
     ${list ? `<pre class="ep-block">${escapeHtml(list)}</pre>` : ""}
-    <div class="q-body">request:</div>
+    <label class="q-body" for="ask-text">request:</label>
     <textarea id="ask-text" class="edit-ta" rows="3">Please review these memory facts (by fact_id) and tidy them: dedupe, fix wording, correct categories. Use fact_store update/remove as needed.\n${sel.map((i) => fid(i)).join(", ")}</textarea>
     <div class="m-actions">
-      <button class="btn" id="ask-copy">copy prompt</button>
-      <button class="btn commit" id="ask-send">send to agent</button></div>
-    <div class="q-body dim" id="ask-status"></div>`, 660);
+      <button type="button" class="btn" id="ask-copy">copy prompt</button>
+      <button type="button" class="btn commit" id="ask-send">send to agent</button></div>
+    <div class="q-body dim" id="ask-status" role="status" aria-live="polite"></div>`, 660);
   const q = (s: string) => back.querySelector<HTMLElement>(s)!;
+  let sessionRequest = 0;
+  let timer: number | undefined;
+  back.addEventListener("eye:close", () => {
+    sessionRequest++;
+    if (timer !== undefined) clearInterval(timer);
+  }, { once: true });
 
   // live session list — refreshed every 8s while the modal is open (#9)
   const refreshSessions = async () => {
-    if (!document.contains(back)) { clearInterval(timer); return; }
+    if (!modalIsOpen(back)) return;
+    const mine = ++sessionRequest;
     try {
       const res = await rpc("agent.sessions", {});
+      if (!modalIsOpen(back) || mine !== sessionRequest) return;
       const sess = q("#ask-eye-session");
       sess.textContent = res.eye_attached_session
         ? `eye attached: ${res.eye_attached_session}` : "";
-      if (res.ok) {
+      if (res.ok && Array.isArray(res.sessions)) {
         const select = q("#ask-session") as HTMLSelectElement;
         const current = select.value;
         const opts = [`<option value="eye-console">eye-console (the Eye's own session)</option>`]
-          .concat((res.sessions || []).slice(0, 25).map((s: any) => {
+          .concat(res.sessions.slice(0, 25).map((s: any) => {
             const label = s.title || s.session_id;
             const plat = s.platform ? ` · ${s.platform}` : "";
-            return `<option value="${escapeHtml(s.session_id)}">${escapeHtml(String(label).slice(0, 60))}${plat}</option>`;
+            return `<option value="${escapeHtml(String(s.session_id ?? ""))}">${escapeHtml(String(label).slice(0, 60))}${escapeHtml(plat)}</option>`;
           }));
         select.innerHTML = opts.join("");
         if ([...select.options].some((o) => o.value === current)) select.value = current;
       }
-    } catch { /* list stays as-is */ }
+    } catch (err: any) {
+      if (modalIsOpen(back) && mine === sessionRequest) {
+        q("#ask-eye-session").textContent = `session list unavailable: ${String(err?.message ?? err)}`;
+      }
+    }
   };
-  const timer = window.setInterval(refreshSessions, 8000);
-  refreshSessions();
+  timer = window.setInterval(() => void refreshSessions(), 8000);
+  void refreshSessions();
 
-  q("#ask-copy").onclick = () => {
-    navigator.clipboard.writeText((q("#ask-text") as HTMLTextAreaElement).value);
-    q("#ask-status").textContent = "copied — paste it to the agent on any platform";
+  q("#ask-copy").onclick = async () => {
+    const copy = q("#ask-copy") as HTMLButtonElement;
+    if (copy.disabled) return;
+    copy.disabled = true;
+    try {
+      await navigator.clipboard.writeText((q("#ask-text") as HTMLTextAreaElement).value);
+      if (modalIsOpen(back)) q("#ask-status").textContent = "Copied. Paste it to the agent on any platform.";
+    } catch (err: any) {
+      if (modalIsOpen(back)) {
+        q("#ask-status").textContent = `Copy failed: ${String(err?.message ?? err)}. Select the prompt and copy it manually.`;
+      }
+    } finally {
+      if (modalIsOpen(back)) copy.disabled = false;
+    }
   };
   q("#ask-send").onclick = async () => {
+    const send = q("#ask-send") as HTMLButtonElement;
+    if (send.disabled) return;
     const target = (q("#ask-session") as HTMLSelectElement).value;
-    q("#ask-status").textContent = `sending to session "${target}"…`;
+    send.disabled = true;
+    send.textContent = "sending…";
+    q("#ask-status").textContent = `Sending to session "${target}"…`;
+    let res: any;
     try {
-      const res = await rpc("agent.ask", {
+      res = await rpc("agent.ask", {
         prompt: (q("#ask-text") as HTMLTextAreaElement).value,
         fact_ids: sel,
         session_id: target,
       });
-      q("#ask-status").innerHTML =
-        `landed in <b>${escapeHtml(res.session_id ?? target)}</b> — agent replied: ` +
-        `<b>${escapeHtml(String(res.reply).slice(0, 220))}</b>`;
-      (window as any).eyeRefresh();
     } catch (err: any) {
-      q("#ask-status").textContent =
-        `${err.message} — falling back to copy-prompt (see PLAN P6 fallback)`;
+      if (!modalIsOpen(back)) return;
+      const uncertain = err?.outcome === "unknown";
+      q("#ask-status").textContent = uncertain
+        ? String(err?.message ?? err)
+        : `${String(err?.message ?? err)} Copy the prompt if you want to use the manual fallback.`;
+      send.textContent = uncertain ? "outcome unknown" : "send to agent";
+      send.disabled = uncertain;
+      return;
+    }
+    if (!modalIsOpen(back)) return;
+    send.textContent = "sent";
+    send.disabled = true;
+    q("#ask-status").textContent =
+      `Sent to ${String(res.session_id)}. Agent replied: ${String(res.reply).slice(0, 220)}`;
+    try {
+      await (window as any).eyeRefresh();
+    } catch (err: any) {
+      if (modalIsOpen(back)) q("#ask-status").textContent +=
+        ` Read refresh failed: ${String(err?.message ?? err)}. The request was already sent.`;
     }
   };
 }
@@ -425,19 +623,41 @@ function glossaryHtml(): string {
 // (r2 #5/#12). The legend + glossary live in the ? manual, linked below.
 // ---------------------------------------------------------------------------
 
+const UI_SCALES = new Set(["0.85", "1", "1.1", "1.25"]);
+
+function storedUiScale(): string {
+  const stored = getStored("eyeUiScale") ?? "1";
+  if (UI_SCALES.has(stored)) return stored;
+  setStored("eyeUiScale", "1");
+  return "1";
+}
+
 /** Apply persisted UI preferences (text size, garden). Called at boot and
     whenever a setting changes. */
 export function applyUiPrefs(): void {
-  const scale = Number(localStorage.getItem("eyeUiScale") || "1") || 1;
+  const scale = Number(storedUiScale());
   document.documentElement.style.fontSize = `${(13 * scale).toFixed(2)}px`;
   document.body.classList.toggle("no-garden",
-    localStorage.getItem("eyeGarden") === "off");
+    getStored("eyeGarden") === "off");
 }
 
 export function openSettings(): void {
   const s = store.stats;
-  const scale = localStorage.getItem("eyeUiScale") || "1";
-  const garden = localStorage.getItem("eyeGarden") !== "off";
+  const scale = storedUiScale();
+  const garden = getStored("eyeGarden") !== "off";
+  let geometry: any = null;
+  try { geometry = fieldRef?.geometryStatus?.() ?? null; } catch { /* show unavailable honestly */ }
+  const geometryMode = geometry?.mode === "wasm" ? "Zig/WASM"
+    : geometry?.mode === "javascript" ? "JavaScript fallback" : "loading";
+  const packed = Number.isFinite(geometry?.packedFacts)
+    ? `${geometry.packedFacts} packed facts` : "packed fact count loading";
+  const geometryReason = geometry?.reason
+    ? `Fallback reason: ${escapeHtml(String(geometry.reason))}`
+    : geometryMode === "Zig/WASM"
+      ? "Field hit testing is using the loaded Zig WebAssembly kernel."
+      : geometryMode === "JavaScript fallback"
+        ? "The WebAssembly kernel is unavailable. Field hit testing remains exact in JavaScript."
+        : "The geometry kernel is still loading. Settings reads this status when opened.";
   const back = modal("⚙ SETTINGS", `
     <div class="q-body dim">switches and controls only — the field legend, keys, and
       terminology live in the <a id="st-manual">? manual</a> (one canonical copy).</div>
@@ -445,9 +665,9 @@ export function openSettings(): void {
     <div class="ep-label">appearance</div>
     <div class="st-row"><span class="st-k">theme</span>
       <span class="theme-grid">${THEMES.map((t) => `
-        <span class="theme-chip${t.id === theme.id ? " active" : ""}" data-th="${t.id}"
-          style="background:${t.bg};color:${t.ink};border-color:${t.accent}">
-          <i style="background:${t.accent}"></i>${escapeHtml(t.label)}</span>`).join("")}
+        <button type="button" class="theme-chip${t.id === theme.id ? " active" : ""}" data-th="${t.id}"
+          aria-pressed="${t.id === theme.id}" style="background:${t.bg};color:${t.ink};border-color:${t.accent}">
+          <i style="background:${t.accent}"></i>${escapeHtml(t.label)}</button>`).join("")}
       </span>
       <span class="st-why">palette rows in the sysmon/Phosphor way — every canvas, dot and
         flower re-inks with the room. Blossom AMOLED is the original v3 true-black look.
@@ -466,6 +686,11 @@ export function openSettings(): void {
       <span class="st-why">purely decorative and grown fresh each launch (seeded, never tiled);
         it lives in its own lane and behind the Field, so it can never cover data.
         Switch it off for a bare instrument panel.</span></div>
+
+    <div class="ep-label">performance</div>
+    <div class="st-row"><span class="st-k">field geometry</span>
+      <span class="v">${geometryMode} · ${packed}</span>
+      <span class="st-why">${geometryReason}</span></div>
 
     <div class="ep-label">projection</div>
     <div class="st-row"><span class="st-k">refit</span>
@@ -492,16 +717,20 @@ export function openSettings(): void {
       // listener; a second explicit regrow here caused the double-draw
       // that could land mid-bloom (feedback r3 glitch)
       applyTheme(chip.dataset.th!);
-      back.querySelectorAll<HTMLElement>(".theme-chip").forEach((c) =>
-        c.classList.toggle("active", c === chip));
+      back.querySelectorAll<HTMLElement>(".theme-chip").forEach((c) => {
+        const active = c === chip;
+        c.classList.toggle("active", active);
+        c.setAttribute("aria-pressed", String(active));
+      });
     };
   });
   back.querySelector<HTMLSelectElement>("#st-scale")!.onchange = (e) => {
-    localStorage.setItem("eyeUiScale", (e.target as HTMLSelectElement).value);
+    const value = (e.target as HTMLSelectElement).value;
+    setStored("eyeUiScale", UI_SCALES.has(value) ? value : "1");
     applyUiPrefs();
   };
   back.querySelector<HTMLInputElement>("#st-garden")!.onchange = (e) => {
-    localStorage.setItem("eyeGarden",
+    setStored("eyeGarden",
       (e.target as HTMLInputElement).checked ? "on" : "off");
     applyUiPrefs();
     // canvases were display:none while off (sizes stale) — regrow, and
@@ -509,8 +738,20 @@ export function openSettings(): void {
     regrowGarden(true);
   };
   back.querySelector<HTMLElement>("#st-refit")!.onclick = async () => {
-    await (window as any).eyeRefit();
-    openSettings();
+    const button = back.querySelector<HTMLButtonElement>("#st-refit")!;
+    if (button.disabled) return;
+    button.disabled = true;
+    button.textContent = "refitting…";
+    try {
+      await (window as any).eyeRefit();
+      if (modalIsOpen(back)) openSettings();
+    } catch (err: any) {
+      if (modalIsOpen(back)) {
+        button.disabled = false;
+        button.textContent = "refit now";
+        alert(String(err?.message ?? err));
+      }
+    }
   };
   back.querySelector<HTMLElement>("#st-token")!.onclick = () => {
     if (confirm("forget stored token? you'll need to re-paste it")) {

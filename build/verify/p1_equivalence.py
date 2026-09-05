@@ -113,6 +113,8 @@ def snapshot_db(db_path: Path) -> dict:
             for k, v in d.items():
                 if isinstance(v, bytes):
                     d[k] = base64.b64encode(v).decode()
+            if table == "memory_banks":
+                d.pop("updated_at", None)
             rows.append(d)
         out[table] = rows
     conn.close()
@@ -139,6 +141,21 @@ def load_eye_module():
     return mod
 
 
+def normalize_script_times(provider, initial_marks) -> None:
+    """Freeze timestamps only on rows created by this synthetic script."""
+    with provider._store._lock:
+        provider._store._conn.execute(
+            "UPDATE facts SET created_at = ?, updated_at = ? WHERE fact_id > ?",
+            ("2000-01-01 00:00:00", "2000-01-01 00:00:00",
+             initial_marks["fact_id"]),
+        )
+        provider._store._conn.execute(
+            "UPDATE entities SET created_at = ? WHERE entity_id > ?",
+            ("2000-01-01 00:00:00", initial_marks["entity_id"]),
+        )
+        provider._store._conn.commit()
+
+
 def verify_i2_i3(tmp: Path) -> None:
     from plugins.memory.holographic import HolographicMemoryProvider
 
@@ -156,6 +173,24 @@ def verify_i2_i3(tmp: Path) -> None:
         config={"journal_path": str(journal_path), "mode": "journal"}, inner=inner
     )
     wrapped.initialize("verify-session")
+    initial_marks = {
+        "stock": {
+            "fact_id": stock._store._conn.execute(
+                "SELECT COALESCE(MAX(fact_id), 0) FROM facts"
+            ).fetchone()[0],
+            "entity_id": stock._store._conn.execute(
+                "SELECT COALESCE(MAX(entity_id), 0) FROM entities"
+            ).fetchone()[0],
+        },
+        "wrapped": {
+            "fact_id": inner._store._conn.execute(
+                "SELECT COALESCE(MAX(fact_id), 0) FROM facts"
+            ).fetchone()[0],
+            "entity_id": inner._store._conn.execute(
+                "SELECT COALESCE(MAX(entity_id), 0) FROM entities"
+            ).fetchone()[0],
+        },
+    }
 
     check("wrapped provider name", wrapped.name == "holographic-eye", wrapped.name)
     check("tool schemas identical",
@@ -183,6 +218,8 @@ def verify_i2_i3(tmp: Path) -> None:
                 fid = json.loads(results[side]).get("fact_id")
                 key = "alpha" if "Alpha" in args["content"] else "beta"
                 ids[side].setdefault(key, fid)
+        normalize_script_times(stock, initial_marks["stock"])
+        normalize_script_times(inner, initial_marks["wrapped"])
         if results["stock"] != results["wrapped"]:
             mismatches += 1
             print(f"    op {i} ({tool}/{args.get('action')}):")
@@ -203,6 +240,8 @@ def verify_i2_i3(tmp: Path) -> None:
     inner._config["auto_extract"] = True
     stock.on_session_end(msgs)
     wrapped.on_session_end(msgs)
+    normalize_script_times(stock, initial_marks["stock"])
+    normalize_script_times(inner, initial_marks["wrapped"])
 
     # final DB state comparison
     snap_a, snap_b = snapshot_db(db_a), snapshot_db(db_b)

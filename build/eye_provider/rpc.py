@@ -11,14 +11,220 @@ Copyright (C) 2026 Ben. GPLv3 — see LICENSE.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+import math
+import sqlite3
+from numbers import Real
+from typing import Any, Dict, Optional
 
 from . import images
 
 _PASSTHROUGH_ACTIONS = {"search", "probe", "related", "reason", "contradict", "list"}
+_MUTATION_METHODS = {
+    "fact.add", "fact.update", "fact.remove", "fact.trust_set", "fact.feedback",
+    "entity.merge", "entity.alias", "entity.remove", "undo", "backfill_vectors",
+}
+
+
+def _positive_int(params: Dict[str, Any], key: str) -> Optional[str]:
+    value = params.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        return f"{key} must be a positive integer"
+    return None
+
+
+def _nonnegative_int(params: Dict[str, Any], key: str) -> Optional[str]:
+    value = params.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return f"{key} must be a non-negative integer"
+    return None
+
+
+def _finite_real(params: Dict[str, Any], key: str) -> Optional[str]:
+    value = params.get(key)
+    if not isinstance(value, Real) or isinstance(value, bool) or not math.isfinite(float(value)):
+        return f"{key} must be a finite number"
+    return None
+
+
+def _string(params: Dict[str, Any], key: str, *, nonempty: bool = False) -> Optional[str]:
+    value = params.get(key)
+    if not isinstance(value, str):
+        return f"{key} must be a string"
+    if nonempty and not value.strip():
+        return f"{key} must not be empty"
+    return None
+
+
+def _string_list(params: Dict[str, Any], key: str, *, nonempty: bool = False) -> Optional[str]:
+    value = params.get(key)
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
+        return f"{key} must be a list of strings"
+    if nonempty and not value:
+        return f"{key} must not be empty"
+    return None
+
+
+def _validate_params(method: str, params: Dict[str, Any]) -> Optional[str]:
+    if method in _PASSTHROUGH_ACTIONS:
+        if method == "search" and (error := _string(params, "query", nonempty=True)):
+            return error
+        if method in ("probe", "related") and (
+            error := _string(params, "entity", nonempty=True)
+        ):
+            return error
+        if method == "reason" and (
+            error := _string_list(params, "entities", nonempty=True)
+        ):
+            return error
+        if "category" in params and (
+            error := _string(params, "category", nonempty=True)
+        ):
+            return error
+        if "limit" in params and (error := _positive_int(params, "limit")):
+            return error
+        if "min_trust" in params and (error := _finite_real(params, "min_trust")):
+            return error
+    if method in ("fact.get", "fact.remove", "fact.trust_set", "fact.feedback",
+                  "fact.preview_update", "fact.update"):
+        if error := _positive_int(params, "fact_id"):
+            return error
+    if method == "fact.get" and "include_vector" in params and not isinstance(
+        params["include_vector"], bool
+    ):
+        return "include_vector must be a boolean"
+    if method == "fact.add":
+        if error := _string(params, "content", nonempty=True):
+            return error
+        for key in ("category", "tags"):
+            if key in params and (error := _string(
+                params, key, nonempty=(key == "category")
+            )):
+                return error
+    if method == "fact.update":
+        fields = {"content", "trust_delta", "tags", "category"} & params.keys()
+        if not fields:
+            return "fact.update requires content, trust_delta, tags, or category"
+        if "content" in params and (error := _string(params, "content", nonempty=True)):
+            return error
+        if "trust_delta" in params and (error := _finite_real(params, "trust_delta")):
+            return error
+        for key in ("tags", "category"):
+            if key in params and (error := _string(
+                params, key, nonempty=(key == "category")
+            )):
+                return error
+    if method == "fact.preview_update":
+        fields = {"content", "tags", "category"} & params.keys()
+        if not fields:
+            return "fact.preview_update requires content, tags, or category"
+        if "content" in params and (error := _string(params, "content", nonempty=True)):
+            return error
+        for key in ("tags", "category"):
+            if key in params and (error := _string(
+                params, key, nonempty=(key == "category")
+            )):
+                return error
+    if method == "fact.trust_set" and (error := _finite_real(params, "trust")):
+        return error
+    if method == "fact.feedback" and not isinstance(params.get("helpful"), bool):
+        return "helpful must be a boolean"
+    if method == "entity.merge":
+        return _positive_int(params, "src_id") or _positive_int(params, "dst_id")
+    if method in ("entity.alias", "entity.remove"):
+        if error := _positive_int(params, "entity_id"):
+            return error
+    if method == "entity.alias":
+        fields = {"name", "aliases", "entity_type"} & params.keys()
+        if not fields:
+            return "entity.alias requires name, aliases, or entity_type"
+        for key in fields:
+            if error := _string(params, key, nonempty=(key in ("name", "entity_type"))):
+                return error
+    if method in ("undo", "journal.get"):
+        return _positive_int(params, "event_id")
+    if method == "entity.get":
+        if "entity_id" in params:
+            return _positive_int(params, "entity_id")
+        return _string(params, "name", nonempty=True)
+    if method == "journal.tail":
+        if "since_id" in params and (error := _nonnegative_int(params, "since_id")):
+            return error
+        if "limit" in params and (error := _positive_int(params, "limit")):
+            return error
+        if "sources" in params and (error := _string_list(params, "sources")):
+            return error
+        if "newest_first" in params and not isinstance(params["newest_first"], bool):
+            return "newest_first must be a boolean"
+    if method == "entities.list":
+        if "q" in params and (error := _string(params, "q")):
+            return error
+        if "limit" in params and (error := _positive_int(params, "limit")):
+            return error
+        if "offset" in params and (error := _nonnegative_int(params, "offset")):
+            return error
+    if method == "reason.explain":
+        if error := _string_list(params, "entities", nonempty=True):
+            return error
+        if "category" in params and (error := _string(params, "category", nonempty=True)):
+            return error
+        if "limit" in params and (error := _positive_int(params, "limit")):
+            return error
+    if method == "fact.spectrum":
+        if not ({"fact_id", "entities", "banks"} & params.keys()):
+            return "fact.spectrum requires fact_id, entities, or banks"
+        if "fact_id" in params and (error := _positive_int(params, "fact_id")):
+            return error
+        for key in ("entities", "banks"):
+            if key in params and (error := _string_list(params, key)):
+                return error
+    if method == "field.projection" and "refit" in params and not isinstance(params["refit"], bool):
+        return "refit must be a boolean"
+    if method == "agent.ask":
+        if error := _string(params, "prompt", nonempty=True):
+            return error
+        if "session_id" in params and (error := _string(params, "session_id", nonempty=True)):
+            return error
+        if "fact_ids" in params:
+            fact_ids = params["fact_ids"]
+            if (not isinstance(fact_ids, list)
+                    or any(not isinstance(value, int) or isinstance(value, bool) or value <= 0
+                           for value in fact_ids)):
+                return "fact_ids must be a list of positive integers"
+    if method == "backup.create":
+        for key in ("dest_dir", "label"):
+            if key in params and (error := _string(params, key)):
+                return error
+    if method == "backup.list" and "dest_dir" in params:
+        return _string(params, "dest_dir")
+    return None
 
 
 def dispatch(plane, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(method, str) or not method:
+        return {"ok": False, "error": "method required"}
+    if not isinstance(params, dict):
+        return {"ok": False, "error": "params must be an object", "method": method}
+    if error := _validate_params(method, params):
+        return {"ok": False, "error": error, "method": method}
+    try:
+        return _dispatch(plane, method, params)
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError) as exc:
+        return {"ok": False, "error": f"invalid parameters: {exc}", "method": method}
+    except sqlite3.Error as exc:
+        return {"ok": False, "error": f"database operation failed: {exc}", "method": method}
+
+
+def _journal_ready(prov) -> bool:
+    if prov.journal is None:
+        return False
+    try:
+        prov.journal.stats()
+        return True
+    except Exception:
+        return False
+
+
+def _dispatch(plane, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
     prov = plane.active_provider()
     if prov is None:
         return {"error": "no provider attached"}
@@ -70,6 +276,8 @@ def dispatch(plane, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
 
     # -- ask the agent (P6, C6) -------------------------------------------------------
     if method == "agent.ask":
+        if not _journal_ready(prov):
+            return {"ok": False, "error": "journal unavailable; request rejected"}
         return _agent_ask(prov, params)
     if method == "agent.sessions":
         return _agent_sessions(prov, params)
@@ -77,19 +285,24 @@ def dispatch(plane, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
     # -- backup memory (D-0007) -----------------------------------------------------
     if method == "backup.create":
         from . import backup
-        return backup.backup_create(prov, params)
+        with prov._operation_lock:
+            return backup.backup_create(prov, params)
     if method == "backup.list":
         from . import backup
         return backup.backup_list(prov, params)
 
     # -- previews + mutations (journaled, source=eye) ------------------------------
-    if method == "fact.preview_update" or method.startswith(
-        ("fact.", "entity.", "undo", "backfill")
-    ):
+    if method == "fact.preview_update":
         from . import mutations
         return mutations.dispatch(prov, method, params)
+    if method in _MUTATION_METHODS:
+        if not _journal_ready(prov):
+            return {"ok": False, "error": "journal unavailable; mutation rejected"}
+        from . import mutations
+        with prov._operation_lock:
+            return mutations.dispatch(prov, method, params)
 
-    return {"error": f"unknown method: {method}"}
+    return {"ok": False, "error": f"unknown method: {method}"}
 
 
 def _journal(prov):
@@ -159,8 +372,14 @@ def _agent_ask(prov, params: Dict[str, Any]) -> Dict[str, Any]:
                                "fact_ids": params.get("fact_ids", [])},
                       response={"reply": reply[:2000],
                                 "session_id": used_session})
+    if ev is None:
+        return {
+            "ok": False, "reply": reply, "session_id": used_session,
+            "event_id": None, "committed": "unknown", "journaled": False,
+            "error": "agent request completed but journal append failed; inspect state before retry",
+        }
     return {"ok": True, "reply": reply, "session_id": used_session,
-            "event_id": ev["event_id"] if ev else None}
+            "event_id": ev["event_id"]}
 
 
 def _agent_sessions(prov, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,7 +471,7 @@ def _entity_get(prov, params: Dict[str, Any]) -> Dict[str, Any]:
         img = images.entity_image(store, int(params["entity_id"]))
     else:
         row = store._conn.execute(
-            "SELECT entity_id FROM entities WHERE name LIKE ?", (params["name"],)
+            "SELECT entity_id FROM entities WHERE name = ? COLLATE NOCASE", (params["name"],)
         ).fetchone()
         img = images.entity_image(store, int(row["entity_id"])) if row else None
     if img is None:

@@ -1,0 +1,70 @@
+.TH HOLOGRAPHIC-EYE 1 "September 2026" "The Holographic Eye" "User Commands"
+.SH NAME
+holographic-eye \- open and inspect the native Holographic Eye shell
+.SH SYNOPSIS
+.B holographic-eye
+.br
+.B holographic-eye
+.RI " help|version|schema|status|probe " "[--json]"
+.SH DESCRIPTION
+With no arguments,
+.B holographic-eye
+opens the graphical Holographic Eye.
+The shell reads the bearer token from
+.I ~/.hermes/eye_token
+and safely adds it to the loopback control-plane URL.
+It does not print the token.
+.PP
+CLI commands write human-readable text to a terminal.
+They write one JSON object when stdout is a pipe.
+.B --json
+forces JSON output.
+.SH COMMANDS
+.TP
+.B help
+Show command help.
+.TP
+.B version
+Show the installed shell version.
+.B --version
+and
+.B -V
+are aliases.
+.TP
+.B schema
+Show the complete JSON interface contract.
+.B --schema
+is an alias.
+.TP
+.B status
+Check the loopback health endpoint and token file without changing them.
+.TP
+.B probe
+Alias for
+.BR status .
+.SH EXIT STATUS
+.TP
+.B 0
+The command succeeded.
+.TP
+.B 2
+The gateway or token is unavailable. The output supplies a fix.
+.TP
+.B 3
+The arguments are invalid. The output supplies the correct usage.
+.TP
+.B 4
+The graphical shell failed to start. The output supplies a recovery step.
+.SH FILES
+.TP
+.I ~/.hermes/eye_token
+Local bearer token. The shell reads this file but never prints its contents.
+.SH EXAMPLES
+.nf
+holographic-eye
+holographic-eye status --json
+holographic-eye schema
+holographic-eye --version
+.fi
+.SH SEE ALSO
+.BR hermes (1)

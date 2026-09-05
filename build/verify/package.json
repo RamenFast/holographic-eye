@@ -1,0 +1,14 @@
+{
+  "name": "holographic-eye-gui-edge-verify",
+  "version": "1.0.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "build-candidate": "npm --prefix ../eye_frontend run build",
+    "test": "npm run build-candidate && node gui_edge.cjs",
+    "test:no-build": "node gui_edge.cjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.55.0"
+  }
+}

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,46 +66,85 @@ def _snapshot(src_path: Path, dst_path: Path) -> int:
     return dst_path.stat().st_size
 
 
+def _snapshot_counts(memory_path: Path, journal_path: Path | None) -> Dict[str, Any]:
+    with sqlite3.connect(str(memory_path)) as conn:
+        counts = {
+            "facts": conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0],
+            "entities": conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0],
+            "links": conn.execute("SELECT COUNT(*) FROM fact_entities").fetchone()[0],
+            "banks": conn.execute("SELECT COUNT(*) FROM memory_banks").fetchone()[0],
+        }
+    counts["journal_events"] = None
+    if journal_path is not None:
+        with sqlite3.connect(str(journal_path)) as conn:
+            counts["journal_events"] = conn.execute(
+                "SELECT COUNT(*) FROM events"
+            ).fetchone()[0]
+    return counts
+
+
 def backup_create(prov, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a process-consistent pair under the provider operation lock.
+
+    SQLite guarantees each file snapshot. The shared wrapper lock prevents
+    in-process mutations between the two snapshots. A separate process can
+    still write between them; the manifest states that limit explicitly.
+    """
+    from . import __version__
+
     store = prov.store
+    if store is None:
+        return {"ok": False, "error": "memory store unavailable"}
+    if prov.journal is None:
+        return {"ok": False, "error": "journal unavailable; backup rejected"}
     dest_root = _check_dest(str(params.get("dest_dir") or default_dest()))
     label = re.sub(r"[^A-Za-z0-9_-]+", "-", str(params.get("label", ""))).strip("-")
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    label = label[:80]
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     name = f"holo-memory-{stamp}" + (f"-{label}" if label else "")
     folder = dest_root / name
-    folder.mkdir(parents=True, exist_ok=False)
+    partial = dest_root / (name + ".partial")
 
-    files: Dict[str, int] = {}
-    files["memory_store.db"] = _snapshot(Path(store.db_path),
-                                         folder / "memory_store.db")
-    if prov.journal is not None:
-        files["eye_journal.db"] = _snapshot(Path(prov.journal.db_path),
-                                            folder / "eye_journal.db")
+    with prov._operation_lock:
+        try:
+            partial.mkdir(parents=True, exist_ok=False)
+            memory_copy = partial / "memory_store.db"
+            journal_copy = partial / "eye_journal.db"
+            files = {
+                "memory_store.db": _snapshot(Path(store.db_path), memory_copy),
+                "eye_journal.db": _snapshot(Path(prov.journal.db_path), journal_copy),
+            }
+            counts = _snapshot_counts(memory_copy, journal_copy)
+            manifest = {
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "label": label or None,
+                **counts,
+                "files": files,
+                "consistency": "one in-process mutation boundary; external-process writers are not blocked",
+                "restore": "cold restore only: stop gateway, copy the .db files back "
+                           "to ~/.hermes/, start gateway (see README)",
+                "tool": f"holographic-eye {__version__}",
+            }
+            (partial / "manifest.json").write_text(json.dumps(manifest, indent=2))
+            partial.replace(folder)
+        except Exception:
+            shutil.rmtree(partial, ignore_errors=True)
+            raise
 
-    c = store._conn
-    manifest = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "label": label or None,
-        "facts": c.execute("SELECT COUNT(*) FROM facts").fetchone()[0],
-        "entities": c.execute("SELECT COUNT(*) FROM entities").fetchone()[0],
-        "links": c.execute("SELECT COUNT(*) FROM fact_entities").fetchone()[0],
-        "banks": c.execute("SELECT COUNT(*) FROM memory_banks").fetchone()[0],
-        "journal_events": (prov.journal.stats()["total_events"]
-                           if prov.journal else None),
-        "files": files,
-        "restore": "cold restore only: stop gateway, copy the .db files back "
-                   "to ~/.hermes/, start gateway (see README)",
-        "tool": "holographic-eye 0.1.0",
-    }
-    (folder / "manifest.json").write_text(json.dumps(manifest, indent=2))
-
-    ev = prov._append("eye", "backup",
-                      request={k: str(v) for k, v in params.items()},
-                      response={"path": str(folder), **{k: v for k, v in
-                                manifest.items() if k in ("facts", "entities",
-                                                          "journal_events", "files")}})
+        ev = prov._append(
+            "eye", "backup",
+            request={k: str(v) for k, v in params.items()},
+            response={"path": str(folder), **{k: v for k, v in manifest.items()
+                      if k in ("facts", "entities", "journal_events", "files")}},
+        )
+    if ev is None:
+        return {
+            "ok": False, "path": str(folder), "manifest": manifest,
+            "event_id": None, "committed": True, "journaled": False,
+            "error": "backup committed but journal append failed; inspect state before retry",
+        }
     return {"ok": True, "path": str(folder), "manifest": manifest,
-            "event_id": ev["event_id"] if ev else None}
+            "event_id": ev["event_id"]}
 
 
 def backup_list(prov, params: Dict[str, Any]) -> Dict[str, Any]:

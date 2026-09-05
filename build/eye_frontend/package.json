@@ -1,12 +1,12 @@
 {
   "name": "holographic-eye-frontend",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "private": true,
   "description": "The Holographic Eye — TS canvas frontend (compiled from PLAN.md)",
   "license": "GPL-3.0-only",
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --format=iife --outfile=dist/bundle.js --minify --target=es2022 && node copy-static.mjs",
-    "dev": "esbuild src/main.ts --bundle --format=iife --outfile=dist/bundle.js --sourcemap --target=es2022 && node copy-static.mjs",
+    "build": "node ../eye_geometry/build.mjs && esbuild src/main.ts --bundle --format=iife --outfile=dist/bundle.js --minify --target=es2022 && node copy-static.mjs",
+    "dev": "node ../eye_geometry/build.mjs && esbuild src/main.ts --bundle --format=iife --outfile=dist/bundle.js --sourcemap --target=es2022 && node copy-static.mjs",
     "check": "tsc --noEmit"
   },
   "devDependencies": {
