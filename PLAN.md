@@ -13,7 +13,7 @@ ask the agent itself to revise its memory. Zero Hermes core changes.
 ## Current installed build: v1.1.0 (2026-09-05)
 
 UI, reliability, performance, and Zig hit-testing update is installed and verified locally.
-The gateway provider and native DEB shell both report 1.1.0. GitHub publication remains on `dev` pending the master approval gate.
+The gateway provider and native DEB shell both report 1.1.0. The v1.1.0 release contains the native packages, source, and checksums.
 Read `HANDOFF.md` for acceptance results and recovery. D-0016 and D-0017 record the new contracts.
 
 ## Historical status: BUILT & LIVE (compiled 2026-07-02, single session)

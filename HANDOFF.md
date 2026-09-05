@@ -5,7 +5,7 @@
 - Native DEB shell: **1.1.0**, installed and verified.
 - Gateway provider and served frontend: **1.1.0**, active and read-only verified.
 - Native WebKitGTK Settings reports **Zig/WASM** with the current packed fact count.
-- GitHub publication: source is prepared on `dev`; `master` merge/push approval remains pending.
+- GitHub release: **v1.1.0**, with DEB, RPM, source, and SHA256SUMS. See the release page for publication state.
 - No database replacement or schema migration occurred. Other Hermes sessions were not stopped.
 
 The provider tree was staged outside plugin discovery and exchanged atomically.
@@ -52,7 +52,8 @@ Recovery artifacts are under:
 The prior provider tree remains outside discovery for an atomic code rollback.
 Do not run mutation tests against live memory, restore over a live WAL database, or stop another session.
 
-## Remaining publication step
+## Release
 
-After approval, merge and push `master`, tag 1.1.0, and publish the prepared DEB/RPM/source/checksum assets.
-Do not present a draft or a `dev` push as a completed stable release.
+[Download v1.1.0](https://github.com/RamenFast/holographic-eye/releases/tag/v1.1.0).
+The source tag and package versions agree. Verify downloaded assets against SHA256SUMS.
+Provider deployment remains separate from the native package; preserve active conversations during upgrades.
