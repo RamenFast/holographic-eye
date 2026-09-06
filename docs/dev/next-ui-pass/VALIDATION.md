@@ -30,7 +30,7 @@ Separate label-layout measurements used a fixed synthetic camera: warmed p95 was
 ## Installation verified
 The installed executable matches the exact tested DEB. Every served frontend file matches candidate 5. Provider files outside the frontend are unchanged. The gateway retained PID 4025645. Recovery copies remain available. No database changes or service restart were performed.
 
-The initial APT attempt failed before installation; direct installation of the verified DEB succeeded. The frontend directory was exchanged atomically with a verified staged copy. Publication remains a separate approval decision.
+The initial APT attempt failed before installation; direct installation of the verified DEB succeeded. The frontend directory was exchanged atomically with a verified staged copy. Ben approved publication after verification.
 
 Chromium screenshots do not prove native decorations or WebKit behavior. No personal-memory screenshot is public evidence.
 

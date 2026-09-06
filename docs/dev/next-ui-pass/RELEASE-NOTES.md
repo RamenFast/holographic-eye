@@ -14,4 +14,4 @@ All 981 responsive and 107 legacy GUI checks passed. Native WebKit checks passed
 
 The longer warmed component comparison preserved exact pixels and hits and did not reproduce the short-run median draw slowdown. Tail variability remains. At 20,000 facts, cold label layout can exceed the 8ms target. RPM payload availability is not a claim of a Fedora runtime installation.
 
-Publication is pending approval.
+Publication was approved after installation and verification.

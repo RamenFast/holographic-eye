@@ -1,6 +1,6 @@
 # Next UI pass · responsive exploration
 
-Status: frontend and shell 1.2.0 are installed and verified. Provider/API 1.1.0 remains unchanged. Publication to master is awaiting approval.
+Status: frontend and shell 1.2.0 are installed and verified. Provider/API 1.1.0 remains unchanged. Publication is authorized; routine releases use Prime’s judgment unless Ben states otherwise.
 
 ## User outcome
 Floating-view title bars remain visible and usable. Narrow windows do not clip essential controls.

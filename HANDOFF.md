@@ -5,7 +5,7 @@
 - Memory provider/API: **1.1.0**, unchanged. Gateway PID 4025645 was preserved.
 - No database writes, replacement, migration, token changes, or service restart were performed by this pass.
 - Existing Eye windows were not closed or reloaded. Reopen Eye to load the new interface.
-- **Publication is pending approval.** The public stable release remains v1.1.0.
+- Release reference: [v1.2.0](https://github.com/RamenFast/holographic-eye/releases/tag/v1.2.0). See the release page for publication state.
 
 ## New interface
 Narrow windows use Explore/Evidence/Inspect modes. Dialog headers and close controls remain accessible while the body scrolls. The Field adds bounded content snippets without changing coordinates or picking. Categories and Timeline browse loaded facts with exact category filters and explicit Stored/Last updated UTC dates. Unknown dates remain visible.
@@ -22,7 +22,7 @@ The old frontend remains at `~/.hermes/.eye-frontend-stage-1.2-01a072ae` after t
 
 Rollback only the shell/frontend if needed. Do not replace live databases or deploy the old 1.0.3 provider staging tree. The unchanged provider does not need a restart.
 
-## Next decision
-Approve or decline merging the tested dev changes to master and publishing v1.2.0. No release tag or publication is authorized yet.
+## Release authority
+Ben approved publication and entrusted routine release decisions to Prime unless he states otherwise. Recovery and verification remain required; repeated publication approval prompts are not.
 
 The completed v1.1.0 history remains available in the v1.1.0 tag. Its provider restart and database checks are historical, not actions performed in this pass.
