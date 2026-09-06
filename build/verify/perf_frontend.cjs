@@ -2,14 +2,15 @@
 "use strict";
 
 /* Synthetic, offline frontend performance comparison.
-   Baseline defaults to v1.1.0. Candidate is the working tree. This script
+   Baseline defaults to v1.2.0. Candidate is the working tree. This script
    never reads a Hermes token/database and never connects to :8770.
 
-   Scope: v1.1.0 Field/Stream versus candidate Field/Stream under the SAME
-   current UI/state/geometry. This is NOT a whole-release comparison or a
-   claim of new-feature parity. Both arms force labels OFF at construction.
-   The legacy adapter only accepts an active Field, OFF text, and label-cache
-   invalidation (a no-op). Zoom/new views are intentionally unsupported here.
+   Scope: baseline Field/Stream plus its field-labels dependency versus the
+   candidate modules under the SAME current UI/state/geometry and static CSS.
+   This is NOT a whole-release comparison or a claim of new-feature parity.
+   Both arms force labels OFF at construction. v1.2.0 needs no adapter.
+   Older Fields without field-labels use the legacy adapter: active Field,
+   OFF text, and no-op label invalidation only. It rejects zoom/new views.
    Every fixture fact has a vector and real coordinates, so exact full-canvas
    hashes exclude the intentionally changed vectorless caption by DATA, not
    by masking a mismatch. Null-vector behavior has its own Field/Explorer tests. */
@@ -25,7 +26,7 @@ const REPO = path.resolve(__dirname, "../..");
 const FRONTEND = path.join(REPO, "build/eye_frontend");
 const ESBUILD = path.join(FRONTEND, "node_modules/.bin/esbuild");
 const BROWSER = process.env.EYE_BROWSER || "/usr/bin/thorium-browser";
-const BASELINE_REF = process.env.EYE_PERF_BASELINE || "v1.1.0";
+const BASELINE_REF = process.env.EYE_PERF_BASELINE || "v1.2.0";
 const FACTS = Number(process.env.EYE_PERF_FACTS || 5000);
 const EVENTS = Number(process.env.EYE_PERF_EVENTS || 120);
 // Opt-in diagnostic. The original short comparison remains the default.
@@ -51,7 +52,24 @@ export class Field extends LegacyField {
   }
 }
 `;
+const baselineStage = { files: [], adapter: "none" };
+const staticFiles = ["index.html", "favicon.png"];
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "holo-eye-perf-"));
+
+function stylesheetFiles(html) {
+  const files = new Set();
+  for (const link of html.match(/<link\b[^>]*>/gi) || []) {
+    const attrs = {};
+    for (const match of link.matchAll(/([\w-]+)\s*=\s*(["'])(.*?)\2/g)) attrs[match[1].toLowerCase()] = match[3];
+    if (!(attrs.rel || "").toLowerCase().split(/\s+/).includes("stylesheet")) continue;
+    const href = attrs.href;
+    if (!href || !/^[\w./-]+\.css$/.test(href) || path.isAbsolute(href) || href.split("/").includes(".."))
+      throw new Error(`Benchmark requires a local static CSS path: ${href}`);
+    files.add(href);
+  }
+  if (!files.size) throw new Error("No static stylesheets found. Review current index.html staging.");
+  return [...files];
+}
 
 function median(xs) {
   const sorted = [...xs].sort((a, b) => a - b);
@@ -63,16 +81,19 @@ function stage(name, baseline) {
   fs.mkdirSync(dir, { recursive: true });
   fs.cpSync(path.join(FRONTEND, "src"), path.join(dir, "src"), { recursive: true });
   if (baseline) {
-    for (const file of ["field.ts", "stream.ts"]) {
-      let text = execFileSync("git", ["show", `${BASELINE_REF}:build/eye_frontend/src/${file}`],
-                                { cwd: REPO, encoding: "utf8", timeout: 60000 });
-      if (file === "field.ts") {
-        if (text.split("export class Field {").length !== 2)
-          throw new Error("Legacy Field declaration changed. Review the compatibility adapter before comparing.");
-        text = text.replace("export class Field {", "class LegacyField {") + ADAPTER;
-      }
-      fs.writeFileSync(path.join(dir, "src", file), text);
+    const read = file => execFileSync("git", ["show", `${BASELINE_REF}:build/eye_frontend/src/${file}`],
+      { cwd: REPO, encoding: "utf8", timeout: 60000 });
+    let field = read("field.ts");
+    const hasLabels = /from\s+["']\.\/field-labels["']/.test(field);
+    baselineStage.files = ["field.ts", "stream.ts", ...(hasLabels ? ["field-labels.ts"] : [])];
+    if (!hasLabels) {
+      if (field.split("export class Field {").length !== 2)
+        throw new Error("Legacy Field declaration changed. Review the compatibility adapter before comparing.");
+      field = field.replace("export class Field {", "class LegacyField {") + ADAPTER;
+      baselineStage.adapter = ADAPTER;
     }
+    for (const file of baselineStage.files)
+      fs.writeFileSync(path.join(dir, "src", file), file === "field.ts" ? field : read(file));
   }
   // Apply identical benchmark-only presentation setup before either first draw.
   const mainPath = path.join(dir, "src/main.ts");
@@ -84,8 +105,11 @@ function stage(name, baseline) {
   execFileSync(ESBUILD, [path.join(dir, "src/main.ts"), "--bundle", "--format=iife",
     `--outfile=${path.join(dir, "dist/bundle.js")}`, "--minify", "--target=es2022"],
     { stdio: "pipe", timeout: 60000 });
-  for (const file of ["index.html", "styles.css", "explorer.css", "favicon.png"]) {
-    fs.copyFileSync(path.join(FRONTEND, file), path.join(dir, "dist", file));
+  const html = fs.readFileSync(path.join(FRONTEND, "index.html"), "utf8");
+  for (const file of [...staticFiles, ...stylesheetFiles(html)]) {
+    const target = path.join(dir, "dist", file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(FRONTEND, file), target);
   }
   const wasm = path.join(REPO, "build/eye_geometry/zig-out/geometry.wasm");
   if (fs.existsSync(wasm)) fs.copyFileSync(wasm, path.join(dir, "dist/geometry.wasm"));
@@ -437,8 +461,9 @@ async function candidateChecks(dist) {
       timingScope: "synchronous canvas command submission, not frame presentation latency" },
     vectors: "all facts have vectors; vectorless caption deliberately outside this fixture",
     labels: "off in both arms from construction" },
-    comparison: { scope: "Field/Stream modules under current UI/state/geometry, not whole releases or new-feature parity",
-      baselineAdapter: ADAPTER, camera: "each arm fit() after boot", pixels: "exact full canvas, no crop or tolerance" }, summary, raw: values,
+    comparison: { scope: "Field/Stream and baseline field-labels dependency under current UI/state/geometry/CSS, not whole releases or new-feature parity",
+      baselineFiles: baselineStage.files, baselineAdapter: baselineStage.adapter,
+      sharedStylesheets: stylesheetFiles(fs.readFileSync(path.join(FRONTEND, "index.html"), "utf8")), camera: "each arm fit() after boot", pixels: "exact full canvas, no crop or tolerance" }, summary, raw: values,
     checks, correctness, artifacts: KEEP ? root : "removed" }, null, 2));
   process.exitCode = ok ? 0 : 1;
   } finally {

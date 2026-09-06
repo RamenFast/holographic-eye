@@ -1870,3 +1870,7 @@ Clear in-memory authentication before attempting persistent token removal.
 
 Ben requests usable floating-view title bars, narrow layouts, zoomed fact text, and category/timeline views.
 The next-pass contract is `docs/dev/next-ui-pass/SPEC.md`. Memory data and provider behavior remain protected.
+
+## D-0019 · Clear labels and staged memory editing
+The source contract is docs/dev/label-editor-pass/INTERFACES.md. Ordinary overview captions are silent; zoom tiers expose bounded previews centered below their owners with stems. Color-key samples use the actual renderer, not old age-opacity or fixed ring-color prose.
+The unified editor uses existing APIs, separate details/absolute-trust actions, draft guards and honest preflight/transaction limits. Capacity explanation is persistent and copy-only, with a read-only diagnostic prompt. Native decorations are disabled; close awaits explicit draft decisions without adding remote IPC privileges. Provider/API and retrieval math remain unchanged.

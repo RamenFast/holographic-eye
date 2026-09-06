@@ -1,28 +1,33 @@
-# Holographic Eye handoff · 1.2.0
+# Holographic Eye handoff · 1.3.0
 
 ## Installed state
-- Native DEB shell and served frontend: **1.2.0**, installed and verified.
-- Memory provider/API: **1.1.0**, unchanged. Gateway PID 4025645 was preserved.
-- No database writes, replacement, migration, token changes, or service restart were performed by this pass.
-- Existing Eye windows were not closed or reloaded. Reopen Eye to load the new interface.
-- Release reference: [v1.2.0](https://github.com/RamenFast/holographic-eye/releases/tag/v1.2.0). See the release page for publication state.
+- Frontend and native DEB shell: **1.3.0**, installed and independently verified.
+- Provider/API: **1.1.0**, unchanged. Gateway PID4025645 was preserved; no restart.
+- No live database mutations, replacement, migration, or token changes were performed by installation/testing. Mutation tests used fresh temporary stores.
+- Release reference: [v1.3.0](https://github.com/RamenFast/holographic-eye/releases/tag/v1.3.0). See GitHub for publication state.
 
-## New interface
-Narrow windows use Explore/Evidence/Inspect modes. Dialog headers and close controls remain accessible while the body scrolls. The Field adds bounded content snippets without changing coordinates or picking. Categories and Timeline browse loaded facts with exact category filters and explicit Stored/Last updated UTC dates. Unknown dates remain visible.
+## Delivered
+Labels stay centered below nodes with stems. The overview omits ordinary captions, while zoom reveals bounded content/entity/tag previews. Color key explains actual renderer colors, trust, rings and size.
 
-## Verification
-981 responsive checks, 107 legacy GUI checks, 194 transport checks, 27 offline backend checks, 15 Explorer model/controller checks, seven Zig tests, and 14 Rust tests passed. Clippy and formatting passed. Native WebKit/Openbox checks passed 9/9 for both the release binary and exact DEB payload using isolated synthetic fixtures.
+Inspect → Edit memory stages content/category/tags with preview and one details action. Absolute trust has a separate explicit Set trust action. Derived data stays read-only. Unknown outcomes block automatic retry, and reload/WM-close guards protect dirty, kept, busy and uncertain drafts.
 
-The installed executable matches the tested DEB. All served frontend hashes match candidate 5. Provider files outside the frontend match the protected baseline.
+The SNR button opens a persistent explanation and copyable Hermes prompt. It distinguishes a count-based estimate from Fact trust and measured recall accuracy. Copying does not send anything or mutate memory.
 
-The longer component benchmark preserved exact pixels and hits. Warmed median draw time was 4.7ms baseline versus 4.6ms candidate; p95 was 5.7 versus 6.1ms. This is synchronous canvas-command timing with labels off, not native frame presentation. Label layout at 20,000 facts can exceed the 8ms target, especially cold. See [validation](docs/dev/next-ui-pass/VALIDATION.md) for both favorable and unfavorable observations.
+Native decorations are disabled for the tiling workflow. Minimum size and WM resize/close behavior were tested. No WM configuration or other windows were changed.
+
+## Verification and limits
+1,788 full UI checks,344 high-DPI/forced-colors checks,54 exact-DEB native checks,107 legacy GUI,194 transport,27 offline backend,7 Zig and16 Rust tests passed, plus component/model and browser differential/fallback checks. Native tests used private namespaces and Xvfb/Openbox.
+
+The installed executable matches the DEB payload. All nine served assets match candidate3. Independent verification matched all12 protected non-frontend provider files and the unchanged gateway PID.
+
+Drafts are not saved to disk. Preflight is not a server lock, and details/trust are not an atomic combined save. Memory and journal still have separate commit/crash boundaries. Persistent engine configuration is not editable here.
+
+Performance exact pixels/hits passed, but draw medians increased5.3→5.8ms in the component benchmark. Warm labels were fast; first-use text layout reached22.7ms in one fixture. Do not claim a speedup, universal8ms cold bound, or native frame-rate result. See [validation](docs/dev/label-editor-pass/VALIDATION.md).
 
 ## Recovery
-The old frontend remains at `~/.hermes/.eye-frontend-stage-1.2-01a072ae` after the atomic exchange. Private recovery copies and installation receipts are in `/media/ben/Mass storage/agenticTinkering/claude/holographic-eye/2026-09-05-responsive-exploration/`.
+Previous frontend: `~/.hermes/.eye-frontend-stage-1.3-01a072ae`.
+Private recovery/receipts: `/media/ben/Mass storage/agenticTinkering/claude/holographic-eye/2026-09-06-label-editor/`.
+Rollback only shell/frontend if needed. Never replace live databases or deploy the unrelated old1.0.3 provider stage.
 
-Rollback only the shell/frontend if needed. Do not replace live databases or deploy the old 1.0.3 provider staging tree. The unchanged provider does not need a restart.
-
-## Release authority
-Ben approved publication and entrusted routine release decisions to Prime unless he states otherwise. Recovery and verification remain required; repeated publication approval prompts are not.
-
-The completed v1.1.0 history remains available in the v1.1.0 tag. Its provider restart and database checks are historical, not actions performed in this pass.
+## Continuing authority
+Ben entrusted routine releases to Prime unless he states otherwise. Verification and reversibility remain required; repeated routine publication approval prompts are not.

@@ -39,6 +39,71 @@ fn wait_for_gateway(window: WebviewWindow) {
     });
 }
 
+#[cfg(target_os = "linux")]
+const CLOSE_DECISION_SCRIPT: &str = r#"
+if (typeof window.eyeRequestClose === 'undefined') return true;
+if (typeof window.eyeRequestClose !== 'function') return false;
+return (await window.eyeRequestClose()) === true;
+"#;
+
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct CloseGate(std::sync::atomic::AtomicBool);
+
+#[cfg(target_os = "linux")]
+impl CloseGate {
+    fn begin(&self) -> bool {
+        !self.0.swap(true, std::sync::atomic::Ordering::AcqRel)
+    }
+
+    fn retry(&self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn install_close_guard(window: &WebviewWindow) {
+    use javascriptcore::ValueExt;
+    use std::sync::Arc;
+    use webkit2gtk::WebViewExt;
+
+    let pending = Arc::new(CloseGate::default());
+    let close_window = window.clone();
+    window.on_window_event(move |event| {
+        let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+            return;
+        };
+        // Stop the WM close before asking the page. Never grant remote IPC access.
+        api.prevent_close();
+        if !pending.begin() {
+            return;
+        }
+        let callback_pending = pending.clone();
+        let callback_window = close_window.clone();
+        let dispatched = close_window.with_webview(move |webview| {
+            webview.inner().call_async_javascript_function(
+                CLOSE_DECISION_SCRIPT,
+                None,
+                None,
+                None,
+                None::<&webkit2gtk::gio::Cancellable>,
+                move |result| {
+                    let approved = result
+                        .map(|value| value.is_boolean() && value.to_boolean())
+                        .unwrap_or(false);
+                    // Destroy does not ask again or change the page's reload guard.
+                    if !approved || callback_window.destroy().is_err() {
+                        callback_pending.retry();
+                    }
+                },
+            );
+        });
+        if dispatched.is_err() {
+            pending.retry();
+        }
+    });
+}
+
 fn launch_gui() -> Result<(), String> {
     tauri::Builder::default()
         .setup(|app| {
@@ -52,8 +117,11 @@ fn launch_gui() -> Result<(), String> {
                 .title("The Holographic Eye")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(640.0, 480.0)
+                .decorations(false)
                 .background_color(tauri::window::Color(0, 0, 0, 255))
                 .build()?;
+            #[cfg(target_os = "linux")]
+            install_close_guard(&window);
             if !gateway_ready {
                 wait_for_gateway(window);
             }
@@ -90,6 +158,38 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pending_close_ignores_duplicates_and_allows_retry() {
+        let gate = CloseGate::default();
+        assert!(gate.begin());
+        assert!(!gate.begin());
+        assert!(!gate.begin());
+        gate.retry();
+        assert!(gate.begin());
+        assert!(!gate.begin());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn concurrent_close_requests_have_one_owner() {
+        let gate = std::sync::Arc::new(CloseGate::default());
+        let workers: Vec<_> = (0..16)
+            .map(|_| {
+                let gate = gate.clone();
+                std::thread::spawn(move || gate.begin())
+            })
+            .collect();
+        let owners = workers
+            .into_iter()
+            .filter_map(|worker| worker.join().ok())
+            .filter(|owned| *owned)
+            .count();
+        assert_eq!(owners, 1);
+        gate.retry();
+        assert!(gate.begin());
+    }
 
     #[test]
     fn unsafe_token_bytes_are_url_encoded_and_round_trip() {

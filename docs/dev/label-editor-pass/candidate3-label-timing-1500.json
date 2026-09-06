@@ -1,0 +1,797 @@
+{
+  "status": "ok",
+  "tool": "perf_field_labels",
+  "version": "1",
+  "ts": "2026-09-06T02:50:34.691Z",
+  "scope": "FieldLabels layout only; synthetic Chromium Canvas2D; no live data or native WebKitGTK claim",
+  "measurement": {
+    "viewport": "1920x1200",
+    "ui": 1,
+    "dpr": 1,
+    "cold": "first layout after sync, empty text cache",
+    "warm": "40 small camera pans; retained text cache; no discarded warmup",
+    "sync": "reported separately; excludes fixture construction",
+    "targetMs": 8,
+    "targetMeaning": "warmed p95 goal, not a universal cold bound; overview includes dot scan but no text shaping"
+  },
+  "cases": [
+    {
+      "count": 1500,
+      "fixture": "regular grid; all projected; unique loaded Unicode text",
+      "zoomRatio": 1,
+      "tier": "overview",
+      "fitScale": 0.863157894736842,
+      "scale": 0.863157894736842,
+      "syncMs": 0.20000004768371582,
+      "cold": {
+        "layoutMs": 1.7000000476837158,
+        "visible": 1500,
+        "accepted": 0,
+        "measured": 0
+      },
+      "warm": [
+        {
+          "layoutMs": 1,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 5,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 1.2000000476837158,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 1.0999999046325684,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.9000000953674316,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.3000001907348633,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.19999980926513672,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.3000001907348633,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.20000004768371582,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.20000004768371582,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.3000001907348633,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 1500,
+          "accepted": 0,
+          "measured": 0
+        }
+      ],
+      "warmMedianMs": 0.39999985694885254,
+      "warmP95Ms": 1.2000000476837158
+    },
+    {
+      "count": 1500,
+      "fixture": "regular grid; all projected; unique loaded Unicode text",
+      "zoomRatio": 2.5,
+      "tier": "two-line-24",
+      "fitScale": 0.863157894736842,
+      "scale": 2.157894736842105,
+      "syncMs": 0.10000014305114746,
+      "cold": {
+        "layoutMs": 22.700000047683716,
+        "visible": 589,
+        "accepted": 24,
+        "measured": 28
+      },
+      "warm": [
+        {
+          "layoutMs": 1.5,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1.5,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.7999999523162842,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.9000000953674316,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1.2000000476837158,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1.2000000476837158,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.8999998569488525,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1.1000001430511475,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1.0999999046325684,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 1.2000000476837158,
+          "visible": 589,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.5999999046325684,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.7999999523162842,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.7000000476837158,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.7000000476837158,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.7000000476837158,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.9000000953674316,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.7000000476837158,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.5999999046325684,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 570,
+          "accepted": 24,
+          "measured": 28
+        }
+      ],
+      "warmMedianMs": 0.5999999046325684,
+      "warmP95Ms": 1.5
+    },
+    {
+      "count": 1500,
+      "fixture": "regular grid; all projected; unique loaded Unicode text",
+      "zoomRatio": 8,
+      "tier": "two-line-48",
+      "fitScale": 0.863157894736842,
+      "scale": 6.905263157894736,
+      "syncMs": 0,
+      "cold": {
+        "layoutMs": 4.3999998569488525,
+        "visible": 45,
+        "accepted": 45,
+        "measured": 45
+      },
+      "warm": [
+        {
+          "layoutMs": 1.1000001430511475,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.5999999046325684,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 1.5,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 1.2999999523162842,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.3000001907348633,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.7999999523162842,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.3000001907348633,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 45,
+          "accepted": 45,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.39999985694885254,
+          "visible": 45,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.3000001907348633,
+          "visible": 45,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 45,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 45,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.3000001907348633,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.5,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.3000001907348633,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 0.2999999523162842,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 45
+        },
+        {
+          "layoutMs": 1,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 50
+        },
+        {
+          "layoutMs": 0.40000009536743164,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 50
+        },
+        {
+          "layoutMs": 0.19999980926513672,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 50
+        },
+        {
+          "layoutMs": 0.6000001430511475,
+          "visible": 50,
+          "accepted": 40,
+          "measured": 50
+        }
+      ],
+      "warmMedianMs": 0.39999985694885254,
+      "warmP95Ms": 1.2999999523162842
+    }
+  ],
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/144.0.0.0 Safari/537.36"
+}

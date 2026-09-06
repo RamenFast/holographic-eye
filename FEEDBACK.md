@@ -36,3 +36,10 @@ Rules:
 - 2026-09-05 [feature] Reveal fact text and content while zooming when the Field has enough free space.
 - 2026-09-05 [feature] Add useful category-based memory views.
 - 2026-09-05 [feature] Add useful timeline views with explicit date semantics.
+
+- 2026-09-05 [correction] Fact captions must clearly belong to their nodes, preferably below them; fully zoomed-out text is currently ambiguous.
+- 2026-09-05 [ui] Add a discoverable color chart explaining the node colors.
+- 2026-09-05 [ui] Progressive zoom may show tags, entities, available reasoning context, or a content start; full content is not required.
+- 2026-09-05 [feature] Build a unified, Ben-friendly surface for modifying memory contents and supported parameters.
+- 2026-09-05 [ui] Keep the holographic trust/crowding warning open while the pointer is over it, and provide a copyable Hermes-agent prompt.
+- 2026-09-05 [correction] Remove redundant GTK window headers for Ben’s tiling-window-manager setup.

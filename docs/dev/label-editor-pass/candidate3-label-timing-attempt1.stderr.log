@@ -1,0 +1,4 @@
+Error: Close zoom fixture did not shape and accept real labels
+    at /home/ben/Dev/ClaudeWorkspace/HolographicViewer/build/verify/perf_field_labels.cjs:47:72
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at process.processImmediate (node:internal/timers:472:9)

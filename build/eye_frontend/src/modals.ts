@@ -12,15 +12,20 @@ import { escapeHtml } from "./field";
 let fieldRef: any = null;
 export function setField(f: any): void { fieldRef = f; }
 
-let activeModalClose: (() => void) | null = null;
-let modalSerial = 0;
-const modalClosers = new WeakMap<HTMLElement, () => void>();
-
-function closeModal(back: HTMLElement): void {
-  modalClosers.get(back)?.();
+export interface ModalOptions {
+  beforeClose?: () => boolean;
+  preserveReasonHalo?: boolean;
 }
 
-function modalIsOpen(back: HTMLElement): boolean {
+let activeModalClose: ((preserveReasonHalo?: boolean) => boolean) | null = null;
+let modalSerial = 0;
+const modalClosers = new WeakMap<HTMLElement, () => boolean>();
+
+export function closeModal(back: HTMLElement): boolean {
+  return modalClosers.get(back)?.() ?? false;
+}
+
+export function modalIsOpen(back: HTMLElement): boolean {
   return document.contains(back) && modalClosers.has(back);
 }
 
@@ -38,8 +43,9 @@ function restoreFocus(prior: HTMLElement | null): void {
   target?.focus({ preventScroll: true });
 }
 
-function modal(title: string, body: string, width = 720): HTMLElement {
-  activeModalClose?.();
+export function modal(title: string, body: string, width = 720,
+                      options: ModalOptions = {}): HTMLElement | null {
+  if (activeModalClose && !activeModalClose(options.preserveReasonHalo)) return null;
   const priorFocus = document.activeElement instanceof HTMLElement
     ? document.activeElement : null;
   const back = document.createElement("div");
@@ -51,20 +57,22 @@ function modal(title: string, body: string, width = 720): HTMLElement {
   document.body.appendChild(back);
 
   let closed = false;
-  const close = () => {
-    if (closed) return;
+  const close = (preserveReasonHalo = false): boolean => {
+    if (closed) return false;
+    if (options.beforeClose && !options.beforeClose()) return false;
     closed = true;
     removeEventListener("keydown", onKeydown);
     modalClosers.delete(back);
     if (activeModalClose === close) activeModalClose = null;
     back.dispatchEvent(new Event("eye:close"));
     back.remove();
-    if (store.reasonHalo) {
+    if (store.reasonHalo && !options.preserveReasonHalo && !preserveReasonHalo) {
       store.reasonHalo = null;
       store.emit("halo");
       fieldRef?.logMath([]);
     }
     restoreFocus(priorFocus);
+    return true;
   };
   const focusable = () => [...back.querySelectorAll<HTMLElement>(
     'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
@@ -95,7 +103,7 @@ function modal(title: string, body: string, width = 720): HTMLElement {
   };
   modalClosers.set(back, close);
   activeModalClose = close;
-  back.querySelector<HTMLElement>(".m-close")!.onclick = close;
+  back.querySelector<HTMLElement>(".m-close")!.onclick = () => { close(); };
   back.onclick = (event) => { if (event.target === back) close(); };
   addEventListener("keydown", onKeydown);
   queueMicrotask(() => {
@@ -118,10 +126,11 @@ export async function openWorkbench(initial: string[] = []): Promise<void> {
       <button class="btn" id="wb-run">run</button>
     </div>
     <pre class="wb-math" id="wb-math">the workbench previews the recall, not the answer —
-what the agent WOULD have been handed for these entities.</pre>
+current provider results for these entities (limit 20), filtered below.</pre>
     <div id="wb-results"></div>
     <div class="wb-thresh">threshold <input type="range" id="wb-slider" min="0" max="1" step="0.05" value="0.5">
       <span class="v" id="wb-tval">0.50</span></div>`);
+  if (!back) return;
   const q = (s: string) => back.querySelector<HTMLElement>(s)!;
   // null = no run yet / computing — never show "nothing" until results exist
   let results: any[] | null = null;
@@ -149,7 +158,7 @@ what the agent WOULD have been handed for these entities.</pre>
           <div class="wb-line2">“${escapeHtml(String(r.content).slice(0, 110))}…”</div>
         </div>`).join("")
       : `<div class="pane-hint">no results above threshold ${th.toFixed(2)} — lower the slider,
-         or the agent genuinely would recall nothing for this combination</div>`;
+         or try another combination. This view only shows the current returned results</div>`;
     q("#wb-results").querySelectorAll<HTMLElement>(".wb-row").forEach((row) => {
       row.onclick = () => store.select([Number(row.dataset.fid)]);
     });
@@ -212,6 +221,7 @@ export async function openFft(factId: number, fact: any): Promise<void> {
     <pre class="wb-math" id="fft-comp">…</pre>
     <div class="pane-hint">bind = phase addition → the bundled spectrum is the true interference
     pattern of the bound components. real math, real data, real plot.</div>`, 700);
+  if (!back) return;
   const q = (s: string) => back.querySelector<HTMLElement>(s)!;
 
   let requestId = 0;
@@ -324,6 +334,7 @@ export async function openEditPreview(factId: number, changes: any): Promise<voi
     <div class="q-body dim" id="ep-status" role="status"></div>
     <div class="m-actions"><button type="button" class="btn" id="ep-cancel">cancel</button>
       <button type="button" class="btn commit" id="ep-commit">commit</button></div>`, 620);
+  if (!back) return;
   back.querySelector<HTMLElement>("#ep-cancel")!.onclick = () => closeModal(back);
   back.querySelector<HTMLElement>("#ep-commit")!.onclick = async () => {
     const button = back.querySelector<HTMLButtonElement>("#ep-commit")!;
@@ -362,6 +373,7 @@ export function openDeleteModal(factId: number, fact: any): void {
     <div class="q-body dim" id="del-status" role="status"></div>
     <div class="m-actions"><button type="button" class="btn" id="del-cancel">cancel</button>
       <button type="button" class="btn del" id="del-go" disabled>delete</button></div>`, 480);
+  if (!back) return;
   const input = back.querySelector<HTMLInputElement>("#del-confirm")!;
   const go = back.querySelector<HTMLButtonElement>("#del-go")!;
   const status = back.querySelector<HTMLElement>("#del-status")!;
@@ -405,6 +417,7 @@ export async function openBackup(): Promise<void> {
     <div class="m-actions"><button type="button" class="btn commit" id="bk-create">create backup</button></div>
     <div class="ep-label">existing backups</div>
     <div id="bk-list" class="q-list" style="max-height:200px;overflow:auto">…</div>`, 640);
+  if (!back) return;
   const q = (s: string) => back.querySelector<HTMLElement>(s)!;
   let refreshId = 0;
   back.addEventListener("eye:close", () => { refreshId++; }, { once: true });
@@ -492,6 +505,7 @@ export function openAskAgent(sel: number[]): void {
       <button type="button" class="btn" id="ask-copy">copy prompt</button>
       <button type="button" class="btn commit" id="ask-send">send to agent</button></div>
     <div class="q-body dim" id="ask-status" role="status" aria-live="polite"></div>`, 660);
+  if (!back) return;
   const q = (s: string) => back.querySelector<HTMLElement>(s)!;
   let sessionRequest = 0;
   let timer: number | undefined;
@@ -589,26 +603,93 @@ export function openAskAgent(sel: number[]): void {
 // Settings links here instead of duplicating it
 // ---------------------------------------------------------------------------
 
+const KEY_PAGE_SIZE = 24;
+
+function keyCategories(): string[] {
+  const categories = new Set(Object.keys(CAT_HUES));
+  for (const fact of store.facts.values()) categories.add(fact.category);
+  return [...categories];
+}
+
+function categoryRows(categories: string[], page: number): string {
+  return categories.slice(page * KEY_PAGE_SIZE, (page + 1) * KEY_PAGE_SIZE).map((category) =>
+    `<tr><th scope="row">${escapeHtml(category)}</th>${[0, 0.5, 1].map((trust) =>
+      `<td><i class="fk-dot" data-category="${escapeHtml(category)}" data-trust="${trust}"
+        style="background:${catColor(category, trust, 0.55 + trust * 0.45)}" aria-hidden="true"></i></td>`).join("")}</tr>`).join("");
+}
+
 function legendHtml(): string {
-  const cats = Object.keys(store.stats.categories ?? CAT_HUES);
-  const swatches = cats.map((c) =>
-    `<span class="lg-swatch"><i style="background:${catColor(c, 0.75)}"></i>${escapeHtml(c)}
-     <span class="v">${store.stats.categories?.[c] ?? ""}</span></span>`).join("");
-  return `
-    <div class="ep-label">the field — what you're looking at</div>
-    <div class="lg-swatches">${swatches}</div>
-    <div class="kv help-kv">
-      <span class="k">hue</span><span>category (above — counts from the live store)</span>
-      <span class="k">saturation</span><span>trust score — washed-out dots are untrusted, vivid dots are trusted</span>
-      <span class="k">size</span><span>how often the fact appeared in recalls (journal-observed)</span>
-      <span class="k">position</span><span>PCA of the fact's real 1024-d HRR phase vector — nearby dots are algebraically similar</span>
-      <span class="k">pink ring</span><span>selected, or structurally hit by the active entity probe</span>
-      <span class="k">gold ring</span><span>above the Reason Workbench threshold — would be recalled</span>
-      <span class="k">hollow rings (strip)</span><span>facts with no HRR vector — outside the algebra until backfilled</span>
-    </div>
-    <div class="pane-hint">themes are palette rows (⚙ → theme, the sysmon/Phosphor way); the
-      semantic rule survives every room: <b>accent</b> = what you're acting on,
-      <b>gold/value</b> = the reference you act against, red = danger.</div>`;
+  return `<section class="field-key" aria-label="Field color key">
+    <h2 class="ep-label">Field color key</h2>
+    <p>Category samples use the Field background and renderer colors. Columns show Fact trust with no context dimming.</p>
+    <table class="fk-categories"><thead><tr><th scope="col">Category</th>
+      <th scope="col">Trust 0</th><th scope="col">Trust 0.5</th><th scope="col">Trust 1</th></tr></thead>
+      <tbody></tbody></table>
+    <div class="fk-pages"><button type="button" class="btn fk-prev">Previous categories</button>
+      <span class="fk-page" role="status"></span><button type="button" class="btn fk-next">Next categories</button></div>
+    <p>Canonical and loaded categories only. Different names can share a color. These are not category counts.</p>
+    <dl class="fk-meanings">
+      <dt>Trust</dt><dd>Higher trust brightens dots in dark themes and deepens them in light themes.
+        It also changes opacity from 0.55 to 1. Colored categories change saturation.
+        Tool and general stay neutral. Opacity does not encode age. Trust is a weight, not a truth measurement.</dd>
+      <dt>Size</dt><dd><span class="fk-sizes">${[0, 5, 50].map((count) => {
+        const radius = Math.max(2, Math.min(8, 2 + Math.log(1 + count) * 1.5));
+        return `<span><i class="fk-dot fk-size" style="width:${radius * 2}px;height:${radius * 2}px" aria-hidden="true"></i> ${count} recalls</span>`;
+      }).join("")}</span>
+        Radius = clamp(2 + ln(1 + retrieval_count) × 1.5, 2, 8) pixels.
+        The Field count includes journal-observed recalls and can retain a higher stored count.
+        Size does not measure importance or guarantee a complete lifetime count.</dd>
+      <dt><i class="fk-ring fk-selected" aria-hidden="true"></i> Selected</dt><dd>Acting token, radius + 4.</dd>
+      <dt><i class="fk-ring fk-hovered" aria-hidden="true"></i> Hovered</dt><dd>Acting token at 0.6 opacity, radius + 3.</dd>
+      <dt><i class="fk-ring fk-entity" aria-hidden="true"></i> Entity match</dt><dd>Acting token at 0.45 opacity, radius + 3.</dd>
+      <dt><i class="fk-ring fk-reason" aria-hidden="true"></i> Reason result</dt><dd>Numerics token at 0.8 opacity, radius + 5.
+        A returned result passing the current Workbench threshold. The request has limit 20.
+        This is not exhaustive recall or hidden reasoning.</dd>
+      <dt>Entity center</dt><dd>The separate breathing ring marks an entity centroid. It is context, not a fact or hit target.</dd>
+      <dt>Context dimming</dt><dd>Entity nonmatches ×0.12. Reason nonmatches ×0.35.
+        Field trust filter nonmatches ×0.07. These factors combine.
+        The filter changes only this view, not stored trust or provider query thresholds.</dd>
+      <dt>Hollow bottom strip</dt><dd>Facts without HRR vectors. They have no projected position.</dd>
+      <dt>Position</dt><dd>PCA projection of HRR vectors. Nearby points are similar in this projection,
+        not causal links or a reasoning trace.</dd>
+    </dl></section>`;
+}
+
+function bindFieldKey(back: HTMLElement): void {
+  const key = back.querySelector<HTMLElement>(".field-key")!;
+  const categories = keyCategories();
+  let page = 0;
+  const prev = key.querySelector<HTMLButtonElement>(".fk-prev")!;
+  const next = key.querySelector<HTMLButtonElement>(".fk-next")!;
+  const render = () => {
+    key.querySelector("tbody")!.innerHTML = categoryRows(categories, page);
+    key.querySelector(".fk-page")!.textContent = `${page * KEY_PAGE_SIZE + 1}–${Math.min((page + 1) * KEY_PAGE_SIZE, categories.length)} of ${categories.length} categories`;
+    prev.disabled = page === 0;
+    next.disabled = (page + 1) * KEY_PAGE_SIZE >= categories.length;
+  };
+  prev.onclick = () => { if (page > 0) { page--; render(); } };
+  next.onclick = () => { if ((page + 1) * KEY_PAGE_SIZE < categories.length) { page++; render(); } };
+  render();
+  repaintFieldKey();
+}
+
+function repaintFieldKey(): void {
+  document.querySelectorAll<HTMLElement>(".field-key [data-category]").forEach((sample) => {
+    const trust = Number(sample.dataset.trust);
+    sample.style.background = catColor(sample.dataset.category!, trust, 0.55 + trust * 0.45);
+  });
+  document.querySelectorAll<HTMLElement>(".field-key .fk-reason").forEach((sample) => {
+    sample.style.borderColor = rgba(theme.numericsRgb, 0.8);
+  });
+}
+
+// One listener for the module lifetime. Repaint samples without replacing focused controls.
+store.on("theme", repaintFieldKey);
+
+export function openFieldKey(): void {
+  const back = modal("FIELD · color key", legendHtml(), 700, { preserveReasonHalo: true });
+  if (!back) return;
+  bindFieldKey(back);
 }
 
 function glossaryHtml(): string {
@@ -618,9 +699,9 @@ function glossaryHtml(): string {
     ["HRR vector", "Holographic Reduced Representation — the fact encoded as 1024 phase angles. bind = phase addition, unbind = subtraction, bundle = superposition. This is the actual math the provider runs, and what the Field draws."],
     ["entity", "a name the provider regex-extracted from fact content (capitalized phrases, quoted strings). Facts link to entities; probe/reason navigate through them. The regex also mints junk — that's what the Entity Desk (right-click) is for."],
     ["probe", "asks: what does memory hold about THIS entity? Algebraic: unbind(fact, bind(entity, ROLE_ENTITY)) — not keyword search."],
-    ["reason", "probe across MULTIPLE entities at once, AND-combined (min of similarities). The Workbench shows you exactly what the agent would be handed."],
+    ["reason", "probe across MULTIPLE entities at once, AND-combined (min of similarities). The Workbench shows returned provider results, limited to 20 and filtered by its threshold."],
     ["bank", "one bundled vector per category (cat:project, …) — the superposition of all its facts' vectors. Rebuilt after every add/update/remove."],
-    ["SNR", "signal-to-noise √(dim/facts). Below 2.0 (gold ⚠) the superposition is crowded and recall accuracy degrades — that's a real capacity warning, not decoration."],
+    ["SNR", "Count-based estimate: sqrt(dim / max(1, total facts)), including facts without vectors. Below 2.0, Eye flags possible crowding. This is distinct from Fact trust. It is not measured recall accuracy or evidence of damaged memory."],
     ["prefetch", "before each agent turn, memory search runs on your message and the top-5 block is injected into context. The Stream's gold lines show the exact injected text."],
     ["mirror", "when the built-in memory tool writes, the provider mirrors it as a fact — a silent write path the journal makes visible."],
     ["auto-extract", "at session end, regex extraction mines facts from the conversation (enabled on this install). Journaled, undoable."],
@@ -724,6 +805,7 @@ export function openSettings(): void {
       <button class="btn" id="st-token">forget stored token</button>
       <span class="st-why">the control plane is loopback-only and bearer-token authed
         (~/.hermes/eye_token) — forget the stored copy if you pasted it on a shared browser.</span></div>`, 640);
+  if (!back) return;
   back.querySelector<HTMLElement>("#st-manual")!.onclick = () => openHelp();
   back.querySelectorAll<HTMLElement>(".theme-chip").forEach((chip) => {
     chip.onclick = () => {
@@ -779,7 +861,7 @@ export function openSettings(): void {
 // ---------------------------------------------------------------------------
 
 export function openHelp(): void {
-  modal("THE HOLOGRAPHIC EYE — manual", `
+  const back = modal("THE HOLOGRAPHIC EYE — manual", `
     <div class="ep-label">keys</div>
     <div class="kv help-kv">
       <span class="k">click / shift+click</span><span>select / multi-select dots</span>
@@ -796,5 +878,7 @@ export function openHelp(): void {
     ${legendHtml()}
     ${glossaryHtml()}
     <div class="pane-hint">no toasts. the ripple, the stream line, the numerics — those are the
-    success indicators. undo lives in the QUEUE tab and on every fact.</div>`, 700);
+    success indicators. undo lives in the QUEUE tab and on every fact.</div>`, 700, { preserveReasonHalo: true });
+  if (!back) return;
+  bindFieldKey(back);
 }
