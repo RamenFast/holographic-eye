@@ -41,3 +41,6 @@ Private recovery and logs: `/media/ben/Mass storage/agenticTinkering/claude/holo
 - `build/verify/shots/gui-edge/v13-final/`
 
 The source repository includes the reproducible harnesses and performance receipts. Screenshots use synthetic memories only. RPM availability is not a claim of Fedora runtime installation.
+
+## Publication verified
+Release v1.3.0 is Latest, not a draft or prerelease. All four downloads match the local verified assets. The tagged source archive rebuilt to exact installed frontend hashes. Verification used authenticated GitHub access; the repository remains private. No visibility setting was changed.

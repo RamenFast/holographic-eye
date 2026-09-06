@@ -4,7 +4,7 @@
 - Frontend and native DEB shell: **1.3.0**, installed and independently verified.
 - Provider/API: **1.1.0**, unchanged. Gateway PID4025645 was preserved; no restart.
 - No live database mutations, replacement, migration, or token changes were performed by installation/testing. Mutation tests used fresh temporary stores.
-- Release reference: [v1.3.0](https://github.com/RamenFast/holographic-eye/releases/tag/v1.3.0). See GitHub for publication state.
+- Release reference: [v1.3.0](https://github.com/RamenFast/holographic-eye/releases/tag/v1.3.0). Published as Latest. DEB, RPM, source and checksums were downloaded and verified. Repository visibility remains private.
 
 ## Delivered
 Labels stay centered below nodes with stems. The overview omits ordinary captions, while zoom reveals bounded content/entity/tag previews. Color key explains actual renderer colors, trust, rings and size.

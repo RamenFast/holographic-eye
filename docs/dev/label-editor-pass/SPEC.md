@@ -1,6 +1,6 @@
 # Label clarity and memory editing
 
-Status: frontend and shell1.3 are installed and verified. Provider/API1.1 remains unchanged. Release publication is in progress.
+Status: frontend and shell1.3 are installed and verified. Provider/API1.1 remains unchanged. Release v1.3.0 is published as Latest; all release downloads were verified using the existing repository access. Repository visibility remains private.
 
 ## User outcomes
 1. Text visibly belongs to its node, preferably below it. No detached captions at the fully zoomed-out overview.
