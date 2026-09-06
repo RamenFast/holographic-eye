@@ -104,8 +104,8 @@ export class Field {
     });
     store.on("selection", () => this.invalidateLabels());
     store.on("entities", () => this.invalidateLabels());   // entity highlight lives here
-    store.on("trustlens", () => this.requestDraw());
-    store.on("halo", () => this.requestDraw());
+    store.on("trustlens", () => this.invalidateLabels());
+    store.on("halo", () => this.invalidateLabels());
     store.on("theme", () => this.requestDraw());      // dots re-ink with the room
     new ResizeObserver(() => this.requestDraw()).observe(this.canvas);
     this.requestDraw();
@@ -498,21 +498,38 @@ export class Field {
     this.updateTooltip(now, w, h);
     if (this.labelMode === "auto") {
       const exclusions: LabelRect[] = [];
-      for (const el of this.container.querySelectorAll<HTMLElement>(".field-title, .context-rail, .context-read, .mathlog, .tooltip, .field-legend, .field-help, .garden-context, #field-context, [data-label-exclusion]")) {
+      const overlays = [
+        ...this.container.querySelectorAll<HTMLElement>(".field-title, .context-rail, .context-read, .mathlog, .tooltip, .field-legend, .field-help, .garden-context, #field-context, [data-label-exclusion]"),
+        ...document.querySelectorAll<HTMLElement>(".capacity-pop"),
+      ];
+      for (const el of overlays) {
         if (!el.getClientRects().length || getComputedStyle(el).display === "none") continue;
         const r = el.getBoundingClientRect();
-        if (r.width && r.height) exclusions.push({ x: r.left - viewport.left, y: r.top - viewport.top, w: r.width, h: r.height });
+        const x = Math.max(0, r.left - viewport.left), y = Math.max(0, r.top - viewport.top);
+        const right = Math.min(w, r.right - viewport.left), bottom = Math.min(h, r.bottom - viewport.top);
+        if (right > x && bottom > y) exclusions.push({ x, y, w: right - x, h: bottom - y });
       }
       if (this.nullTotal) exclusions.push({ x: 0, y: h - 38 - 16 * ui, w, h: 38 + 16 * ui });
       const labels = this.labels.layout(ctx, { w, h, cx: this.cx, cy: this.cy, scale: this.scale, ui,
+        zoom: this.scale / this.fitScale(w, h), focused: store.focusedFact,
+        tooltipId: this.tooltip.style.display === "block" ? this.hoverId : null,
+        reason: halo?.factIds, trustLens: lens,
         selected: store.selection, hover: this.hoverId, highlighted: store.entityHighlight, exclusions }, this.labelMode);
       ctx.font = `${12 * ui}px ui-monospace, monospace`;
       ctx.textBaseline = "top";
       ctx.fillStyle = rgba(theme.inkRgb, 0.95);
-      for (const label of labels) label.lines.forEach((text, i) => ctx.fillText(text, label.x + 3 * ui, label.y + (3 + i * 16) * ui));
+      ctx.strokeStyle = rgba(theme.inkRgb, 0.45);
+      ctx.lineWidth = 1;
+      for (const label of labels) {
+        ctx.beginPath();
+        ctx.moveTo(label.stem.x + 0.5, label.stem.y);
+        ctx.lineTo(label.stem.x + 0.5, label.stem.y + label.stem.h);
+        ctx.stroke();
+        label.lines.forEach((text, i) => ctx.fillText(text, label.x + 3 * ui, label.y + (3 + i * 16) * ui));
+      }
       ctx.textBaseline = "alphabetic";
     } else this.labels.layout(ctx, { w, h, cx: this.cx, cy: this.cy, scale: this.scale, ui,
-      selected: store.selection, hover: this.hoverId, highlighted: store.entityHighlight, exclusions: [] }, "off");
+      zoom: this.scale / this.fitScale(w, h), selected: store.selection, hover: this.hoverId, highlighted: store.entityHighlight, exclusions: [] }, "off");
     return true;
   }
 

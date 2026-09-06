@@ -1,0 +1,28 @@
+/* Field key uses the same surface and token rings as the canvas. GPLv3. */
+.field-key { color: var(--ink-text); }
+.field-key p { margin: 0.7rem 0; }
+.fk-categories { width: 100%; table-layout: fixed; border-collapse: collapse; background: var(--ink-base); }
+.fk-categories th, .fk-categories td { padding: 0.5rem; border-bottom: 1px solid var(--ink-hairline); text-align: center; }
+.fk-categories th:first-child { width: 43%; text-align: left; overflow-wrap: anywhere; }
+.fk-categories th { font-weight: normal; }
+.fk-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; }
+.fk-pages, .fk-sizes { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.6rem 0; }
+.fk-page { flex: 1; }
+.fk-meanings { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 3fr); gap: 0.7rem 1rem; }
+.fk-meanings dt { font-weight: 600; }
+.fk-meanings dd { margin: 0; overflow-wrap: anywhere; }
+.fk-sizes { background: var(--ink-base); padding: 0.5rem; }
+.fk-size { background: var(--ink-text); }
+.fk-ring { display: inline-block; width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; background: var(--ink-base); box-sizing: border-box; }
+.fk-selected { border: 1.25px solid var(--acting); }
+.fk-hovered { border: 1px solid rgba(var(--acting-rgb), 0.6); }
+.fk-entity { border: 1px solid rgba(var(--acting-rgb), 0.45); }
+.fk-reason { border: 2px solid var(--numerics); }
+.field-key button:focus-visible { outline: 2px solid var(--acting); outline-offset: 2px; }
+@media (max-width: 680px) {
+  .fk-meanings { grid-template-columns: 1fr; gap: 0.4rem; }
+  .fk-meanings dd { margin-bottom: 0.7rem; }
+}
+@media (forced-colors: active) {
+  .fk-dot, .fk-ring { border: 1px solid CanvasText; forced-color-adjust: auto; }
+}

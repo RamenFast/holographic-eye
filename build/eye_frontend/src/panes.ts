@@ -7,7 +7,8 @@ import { getStored, setStored } from "./storage";
 import { categoryKey, categoryLabel } from "./explorer-data";
 import { store, fid, EyeEvent, CAT_HUES, catColor } from "./state";
 import { escapeHtml } from "./field";
-import { openWorkbench, openFft, openEditPreview, openDeleteModal } from "./modals";
+import { openWorkbench, openFft, openDeleteModal } from "./modals";
+import { openMemoryEditor } from "./memory-editor";
 
 const MUTATION_KINDS = new Set([
   "add", "update", "remove", "helpful", "unhelpful", "extract",
@@ -568,9 +569,7 @@ export class Inspect {
           <div class="tags">${escapeHtml(fact.tags || "no tags")}</div>
           <div class="content" id="ins-content">${escapeHtml(fact.content)}</div>
           <div class="editlinks" aria-label="Edit fact">
-            <button type="button" class="text-action" id="edit-content">edit content</button>
-            <button type="button" class="text-action" id="edit-category">edit category ▾</button>
-            <button type="button" class="text-action" id="edit-tags">edit tags</button>
+            <button type="button" class="btn commit" id="edit-content">Edit memory</button>
           </div>
         </section>
         <section class="inspect-band evidence-band" aria-labelledby="inspect-evidence">
@@ -585,7 +584,7 @@ export class Inspect {
           <div class="ent-chips" aria-label="Linked entities">${entChips}</div>
           <div class="vecline">hrr_vector&nbsp;&nbsp;${fact.vector_bytes ? `${fact.vector_bytes} B (${store.stats.hrr_dim ?? 1024} × f64)` : "NULL — not in the algebra"}</div>
           <div class="linkrow">
-            ${fact.vector_bytes ? `<button type="button" class="text-action" id="ins-algebra">inspect algebra</button>` : `<button type="button" class="text-action" id="ins-backfill">backfill vector</button>`}
+            ${fact.vector_bytes ? `<button type="button" class="text-action" id="ins-algebra">inspect algebra</button>` : `<button type="button" class="text-action" id="ins-backfill" title="Rebuild vectors for every fact with a missing vector, not only this fact">Backfill all missing vectors</button>`}
             <button type="button" class="text-action" id="ins-export">export fact</button>
             <button type="button" class="text-action" id="ins-reason">reason…</button>
           </div>
@@ -598,10 +597,7 @@ export class Inspect {
             <button class="btn undo" id="ins-undo" title="Undo the most recent journaled change to this fact">↶ undo</button>
             <button class="btn del" id="ins-del">delete</button>
           </div>
-          <div class="kv trust-control">
-            <label class="k" for="trust-slider">set trust</label>
-            <span><input type="range" id="trust-slider" min="0" max="1" step="0.05" value="${trust}" style="width:120px;vertical-align:middle"> <span class="v" id="trust-val">${trust.toFixed(2)}</span></span>
-          </div>
+          <p class="pane-hint">Use Edit memory to stage details or set Fact trust.</p>
         </section>
       </div>`;
     this.bindHeader(true);
@@ -713,33 +709,6 @@ export class Inspect {
       chip.onclick = () => highlightEntity(chip.dataset.name!);
     });
 
-    const slider = q("#trust-slider") as HTMLInputElement;
-    slider.oninput = () => { q("#trust-val")!.textContent = Number(slider.value).toFixed(2); };
-    slider.onchange = async () => {
-      await rpc("fact.trust_set", { fact_id: id, trust: Number(slider.value) });
-      (window as any).eyeRefresh();
-    };
-
-    q("#edit-content")!.onclick = () => {
-      const contentEl = q("#ins-content")!;
-      const ta = document.createElement("textarea");
-      ta.className = "edit-ta"; ta.value = fact.content; ta.rows = 6;
-      contentEl.replaceWith(ta); ta.focus();
-      ta.onkeydown = async (e) => {
-        if (e.key === "Escape") { this.render(); }
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-          openEditPreview(id, { content: ta.value });
-        }
-      };
-    };
-    q("#edit-category")!.onclick = () => {
-      const cats = Object.keys(store.stats.categories ?? CAT_HUES);
-      const next = prompt(`category (${cats.join(" / ")}):`, fact.category);
-      if (next && next !== fact.category) openEditPreview(id, { category: next });
-    };
-    q("#edit-tags")!.onclick = () => {
-      const next = prompt("tags (comma-separated):", fact.tags);
-      if (next !== null && next !== fact.tags) openEditPreview(id, { tags: next });
-    };
+    q("#edit-content")!.onclick = () => { void openMemoryEditor(id); };
   }
 }

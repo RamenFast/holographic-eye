@@ -11,15 +11,16 @@ hit-testing kernel. The provider stays outside Hermes core.
 
 ## The cockpit
 
-- **Field:** real PCA coordinates, pan, zoom, selection, entity highlights, and a trust lens. Readable content snippets appear when space permits; Text can turn them off.
+- **Field:** real PCA coordinates, pan, zoom, selection, entity highlights, and a trust lens. The overview stays quiet; zoom reveals anchored content/entity/tag snippets below their nodes. Color key explains the actual encodings. Text can turn labels off.
 - **Categories and Timeline:** browse loaded facts by exact category or stored/updated UTC metadata, with local filters and bounded pages. Unknown dates remain explicit.
 - **Narrow windows:** switch between Explore, Evidence, and Inspect without losing selection. Dialog headers and close controls stay visible.
 - **Evidence bench:** Entities, Queue, and Contradictions. Open the next layer without losing the Field.
-- **Inspect:** fact anatomy, 50-step back/forward history, edit previews, trust controls, and typed-ID deletion.
+- **Inspect:** memory details and 50-step history. Edit memory stages content, category and tags with an in-place preview. Fact trust has a separate explicit save; sliders do not write on movement.
 - **Stream:** a compact latest-event glance, expandable journal, and direct navigation to returned facts.
 - **Workbench:** preview the provider's recall and inspect its actual vector spectra.
 - **Appearance:** ten palette rows, Blossom Dark by default, four text sizes, and an optional pixel garden.
-- **Recovery:** explicit connection retry, guarded submissions, conditional undo, and SQLite backups.
+- **Recovery:** explicit connection retry, guarded submissions, conditional undo, and SQLite backups. Reload and native-close guards protect unsaved or uncertain editor state.
+- **Capacity:** the SNR control opens a persistent explanation with Copy prompt for Hermes. Copying never sends an agent message or changes memory.
 
 The Field's Zig kernel changes hit testing, not the stored vectors or PCA.
 If WebAssembly cannot load, the same JavaScript selection algorithm remains available.
@@ -27,21 +28,23 @@ Settings reports the active geometry engine.
 
 [Categories at 640×480](docs/categories-narrow.png) · [Timeline at 640×480](docs/timeline-narrow.png)
 
-These screenshots use synthetic facts at 125% text scale. Timeline dates describe stored metadata, not event history.
+[Memory editor](docs/memory-editor.png) · [Color key](docs/field-color-key.png) · [Capacity prompt](docs/capacity-prompt.png)
+
+All screenshots use synthetic facts. The narrow-view screenshots use 125% text scale. Timeline dates describe stored metadata, not event history.
 
 ## Install
 
 The DEB/RPM installs the native shell. The provider and served interface are a separate,
-user-level installation inside Hermes. Version 1.2 updates the shell and frontend; the provider/API remains 1.1.0. Existing 1.1 installations do not need a gateway restart.
+user-level installation inside Hermes. The shell and frontend are 1.3.0; the provider/API remains 1.1.0. Existing provider installations do not need a gateway restart for this interface update.
 
 ### Desktop package
 
 ```bash
 # Debian / Ubuntu / Mint
-sudo apt install ./holographic-eye_1.2.0_amd64.deb
+sudo apt install ./holographic-eye_1.3.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install ./holographic-eye-1.2.0-1.x86_64.rpm
+sudo dnf install ./holographic-eye-1.3.0-1.x86_64.rpm
 
 # Verify the installed shell
 holographic-eye version --json
@@ -51,13 +54,13 @@ holographic-eye status --json
 Linux Mint is the tested host. RPM payload validation does not prove a Fedora runtime install.
 The package also installs the desktop entry, icons, and `man holographic-eye`.
 
-### Existing 1.1 installation: frontend-only update
+### Existing provider installation: frontend-only update
 
 Save any Eye drafts and close its window, not Hermes. Build the frontend from this source tree as shown below. Back up the current assets, then copy only the new frontend:
 
 ```bash
 front="$HOME/.hermes/plugins/holographic-eye/frontend"
-backup="$HOME/.hermes/.eye-frontend-before-1.2-$(date +%Y%m%d-%H%M%S)"
+backup="$HOME/.hermes/.eye-frontend-before-1.3-$(date +%Y%m%d-%H%M%S)"
 cp -a "$front" "$backup"
 rsync -a --delete build/eye_frontend/dist/ "$front/"
 ```
@@ -101,7 +104,7 @@ cd build/eye_shell/src-tauri
 cargo tauri build --bundles deb,rpm
 ```
 
-The native build requires Rust, Tauri CLI 2, GTK3, WebKitGTK 4.1, and their development packages.
+The native build requires Rust, Tauri CLI 2, GTK3, WebKitGTK 4.1 (2.40 or newer), and their development packages.
 Set `ZIG` to an existing Zig **0.15.2** executable to use another compiler location.
 Release assets include DEB, RPM, source tarball, and `SHA256SUMS`.
 
@@ -110,7 +113,7 @@ Release assets include DEB, RPM, source tarball, and `SHA256SUMS`.
 Launch `holographic-eye` from the desktop menu or terminal.
 Use `Ctrl+F` to find a fact, `Ctrl+R` for the Reason Workbench, and `?` for the manual.
 Inspect's Back/Forward buttons retrace single and multi-selections.
-Active entity and trust contexts can be cleared independently.
+Active entity and trust contexts can be cleared independently. The native window is undecorated. Use your window manager’s usual move, resize and close actions.
 
 The Hermes extension remains available:
 `hermes holographic-eye status|tail|undo-last|backup|gui`, plus `/holo` in chat.
@@ -133,6 +136,8 @@ Eye edits require an available journal. Undo rejects an event when affected stat
 Entity operations retain affected fact images, including supported register state.
 Unknown network outcomes are not silently retried; check the journal before sending the action again.
 
+Editor drafts live only in the open app, not on disk. Normal reload/close paths check for unsaved work; this is not crash recovery. Details and absolute trust save separately. Preflight checks can detect changed values, but are not server locks.
+
 A shared operation lock serializes wrapper mutations **within one process**.
 It does not stop another process from writing. Memory and journal are separate SQLite files,
 so a crash or I/O failure between their commits can still leave an unjournaled change.
@@ -153,6 +158,7 @@ node build/verify/gui_edge.cjs
 node build/verify/test_responsive_views.cjs
 node build/verify/test_explorer_data.cjs
 node build/verify/test_field_labels.cjs
+EYE_LABEL_EDITOR_FROZEN=1 node build/verify/test_label_editor_ui.cjs
 node build/verify/perf_frontend.cjs
 # Longer warmed, alternating-order component comparison:
 EYE_PERF_LONG=1 node build/verify/perf_frontend.cjs

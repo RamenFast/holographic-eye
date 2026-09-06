@@ -49,3 +49,7 @@ Provider: run `build/verify/test_backend_edges.py` with Hermes' supported `venv/
 
 The GUI engine state is visible in Settings and through `window.eyeField.geometryStatus()`.
 This reports actual loading/WASM/JavaScript state, not an assumed acceleration claim.
+
+## Memory editor and lifecycle
+The frontend uses existing `fact.preview_update`/`fact.update` for staged content/category/tags. Absolute trust uses a separate explicit `fact.trust_set`; neither slider movement nor preview writes memory. Derived counters, timestamps, vectors and register data remain read-only. Persistent engine configuration has no setter in this surface.
+Drafts are page-local. Preflight checks are not a server lock, and a detail save is not a cross-database transaction. Unknown outcomes block automatic retries. Native close awaits an explicit draft decision through local WebKit evaluation; no remote IPC capability was added. Capacity Copy prompt only writes the clipboard.

@@ -1,0 +1,93 @@
+/* Staged editor, token-based and square-edged. GPLv3. */
+.memory-editor { min-width: 0; }
+.memory-editor .me-section { border-top: 1px solid var(--ink-hairline); padding: 14px 0; }
+.memory-editor h2 { margin: 0 0 10px; font-size: 14px; }
+.memory-editor h3, .memory-editor h4 { margin: 10px 0 5px; font-size: 12px; }
+.memory-editor label { display: block; margin: 0 0 5px; }
+.memory-editor input:not([type="range"]), .memory-editor textarea { box-sizing: border-box; width: 100%; min-width: 0; }
+.memory-editor .me-fields, .memory-editor .me-diff { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.memory-editor pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 5px 0 12px; max-height: 260px; overflow: auto; font-size: 12px; }
+.memory-editor .me-diff pre { border-left: 2px solid var(--ink-hairline); padding-left: 9px; }
+.memory-editor .me-trust-fields { display: grid; grid-template-columns: auto 90px minmax(80px, 1fr) auto; gap: 10px; align-items: center; }
+.memory-editor .me-trust-fields label { margin: 0; }
+.memory-editor .me-error { color: var(--signal-remove); margin: 4px 0; }
+.memory-editor .me-error:empty { display: none; }
+.memory-editor p { font-size: 12px; overflow-wrap: anywhere; }
+.memory-editor details { margin: 12px 0; }
+.memory-editor summary { cursor: pointer; overflow-wrap: anywhere; }
+.memory-editor .m-actions { flex-wrap: wrap; }
+.memory-editor .btn { white-space: normal; }
+.memory-editor #me-leave { border-top: 1px solid var(--ink-hairline); padding-top: 10px; }
+.memory-editor [hidden] { display: none !important; }
+@media (max-width: 600px) {
+  .memory-editor .me-fields, .memory-editor .me-diff { grid-template-columns: minmax(0, 1fr); }
+  .memory-editor .me-trust-fields { grid-template-columns: 1fr 1fr; }
+  .memory-editor .me-trust-fields input[type="range"] { min-width: 0; width: 100%; }
+}
+
+.me-exit-decision { border-bottom: 2px solid var(--reference); padding: 12px 0; margin-bottom: 14px; }
+
+/* Keep entry controls comfortable without changing the shared form chrome. */
+.memory-editor input:not([type="range"]) {
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 0;
+  color: var(--ink-text);
+  background: var(--ink-surface);
+  font: inherit;
+}
+.memory-editor textarea { padding: 9px; line-height: 1.5; }
+.memory-editor input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 36px;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--acting);
+  cursor: pointer;
+}
+.memory-editor input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 0;
+  background: var(--ink-surface);
+}
+.memory-editor input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 22px;
+  margin-top: -9px;
+  border: 1px solid var(--acting);
+  border-radius: 0;
+  background: var(--acting);
+}
+.memory-editor input[type="range"]::-moz-range-track {
+  height: 4px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 0;
+  background: var(--ink-surface);
+}
+.memory-editor input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: 0;
+  background: var(--acting);
+}
+.memory-editor input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 20px;
+  border: 1px solid var(--acting);
+  border-radius: 0;
+  background: var(--acting);
+}
+.memory-editor input:focus-visible, .memory-editor textarea:focus-visible {
+  outline: 2px solid var(--acting);
+  outline-offset: 2px;
+}
+.memory-editor input:disabled { cursor: default; opacity: 0.55; }
+@media (forced-colors: active) {
+  .memory-editor input[type="range"] { forced-color-adjust: auto; }
+  .memory-editor input[type="range"]::-webkit-slider-thumb { background: Highlight; border-color: Highlight; }
+  .memory-editor input[type="range"]::-moz-range-thumb { background: Highlight; border-color: Highlight; }
+}

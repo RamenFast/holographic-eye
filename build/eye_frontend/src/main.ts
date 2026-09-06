@@ -6,15 +6,19 @@ import { store, Fact, EyeEvent, fid, initTheme } from "./state";
 import { Field, escapeHtml } from "./field";
 import { Stream, describe } from "./stream";
 import { MemoryExplorer } from "./explorer";
+import { CapacityWarning, capacitySnapshot } from "./capacity-warning";
+import { requestMemoryEditorExit } from "./memory-editor";
 import { getStored, setStored } from "./storage";
 import { LeftColumn, Inspect, clearEntityHighlight, clearEntityHighlights, closeEntityMenu } from "./panes";
 import { initGarden } from "./garden";
 import { setField, openWorkbench, openBackup, openHelp, openAskAgent,
-         openSettings, applyUiPrefs } from "./modals";
+         openSettings, openFieldKey, applyUiPrefs } from "./modals";
 
 const $ = (s: string) => document.querySelector<HTMLElement>(s)!;
+(window as any).eyeRequestClose = requestMemoryEditorExit;
 
 let field: Field;
+const capacityWarning = new CapacityWarning(() => field?.invalidateLabels());
 let explorer: MemoryExplorer;
 let inspector: Inspect;
 type CentralView = "field" | "categories" | "timeline";
@@ -77,8 +81,10 @@ function renderStatusBar(): void {
     const px = v ? Math.max(2, Math.round((Math.log(1 + v) / Math.log(1 + maxH)) * 12)) : 1;
     spark += `<i class="${v === maxH && v > 0 ? "hot" : ""}" style="height:${px}px" title="trust ${(i / 10).toFixed(1)}: ${v}"></i>`;
   }
-  const snrWarn = (s.snr ?? 9) < 2.0
-    ? ' <span class="warn" title="signal-to-noise √(dim/facts) below 2.0 — the holographic superposition is crowded; recall accuracy degrades as more facts are added">⚠</span>' : "";
+  capacityWarning.beforeRender();
+  const snrWarn = capacityWarning.update(s);
+  const reportedSnr = capacitySnapshot(s).snr;
+  const capacityButton = `<button type="button" id="sb-capacity" class="capacity-trigger${snrWarn ? " warn" : ""}" aria-label="${snrWarn ? "Capacity warning" : "Capacity estimate"}: ${reportedSnr === null ? "unavailable" : escapeHtml(reportedSnr)}. Open details">SNR <b>${reportedSnr === null ? "Unavailable" : escapeHtml(reportedSnr)}</b>${snrWarn ? " ⚠" : ""}</button>`;
   // age of the newest journal event: recent = live wire, old = merely quiet
   const lag = s.journal?.lag_s;
   const jl = lag === undefined ? ""
@@ -92,7 +98,8 @@ function renderStatusBar(): void {
   $("#sb-metrics").innerHTML =
     `<b>${s.facts ?? "…"}</b> facts · <b>${s.entities ?? "…"}</b> entities · ` +
     `trust <span class="spark lens-target" id="spark" title="click: trust lens — view facts above/below a threshold">${spark}${lensMark}</span>${lensBadge}` +
-    ` · SNR <b>${s.snr ?? "…"}</b>${snrWarn}` + jl;
+    ` · ${capacityButton}` + jl;
+  capacityWarning.bind(document.getElementById("sb-capacity"));
   $("#spark").onclick = openTrustLens;
   const dot = $("#sb-live");
   dot.className = `live-dot ${store.wsStatus}`;
@@ -506,6 +513,7 @@ function initExploration(): void {
   $("#field-zoom-out").onclick = () => field.zoomBy(1 / 1.35);
   $("#field-zoom-in").onclick = () => field.zoomBy(1.35);
   $("#field-fit").onclick = () => field.fit();
+  $("#field-color-key").onclick = openFieldKey;
   $("#field-text-mode").onclick = () => {
     field.setLabelMode(field.getLabelMode() === "auto" ? "off" : "auto");
     $("#field-text-mode").textContent = `Text: ${field.getLabelMode()}`;
@@ -529,7 +537,11 @@ function altHistoryBlocked(target: EventTarget | null): boolean {
 
 function bindKeys(): void {
   addEventListener("keydown", (e) => {
-    if (e.defaultPrevented || document.querySelector(".modal-back")) return;
+    if (e.defaultPrevented) return;
+    if (document.querySelector(".modal-back")) {
+      if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r")) e.preventDefault();
+      return;
+    }
     if (e.key === "Escape" && closeTrustLens) {
       e.preventDefault(); closeTrustLens(); return;
     }
