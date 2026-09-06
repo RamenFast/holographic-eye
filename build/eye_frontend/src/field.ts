@@ -10,6 +10,7 @@
 
 import { store, catColor, fid, Fact, theme, rgba } from "./state";
 import { GeometryHitTester, type GeometryStatus } from "./geometry";
+import { FieldLabels, wrapLabel, type LabelRect } from "./field-labels";
 
 interface Effect {
   kind: "arrival" | "ripple" | "bankpulse" | "trust";
@@ -31,6 +32,8 @@ export class Field {
 
   // camera: screen = (world - cx) * scale + viewport/2
   private scale = 1;
+  private initialFitPending = true;
+  private hasProjectedFacts = false;
   private cx = 0;
   private cy = 0;
   private dragging = false;
@@ -47,21 +50,60 @@ export class Field {
   private rafPending = false;
   private tooltipTimer: number | undefined;
   private geometry = new GeometryHitTester();
+  private labels = new FieldLabels();
+  private active = true;
+  private labelMode: "auto" | "off" = "auto";
+  private container: HTMLElement;
+  private nullTotal = 0;
+
+  setActive(active: boolean): void {
+    this.active = active;
+    if (!active) {
+      this.hoverId = null; this.spaceHeld = false; this.dragging = false; this.dragRect = null;
+      clearTimeout(this.tooltipTimer); this.tooltip.style.display = "none";
+    } else this.requestDraw();
+  }
+  setLabelMode(mode: "auto" | "off"): void { this.labelMode = mode; this.invalidateLabels(); }
+  getLabelMode(): "auto" | "off" { return this.labelMode; }
+  labelStatus() { return { ...this.labels.status(), mode: this.labelMode, active: this.active,
+    vectorlessTotal: this.nullTotal, vectorlessVisible: this.stripHits.length }; }
+  invalidateLabels(): void { this.labels.invalidate(); this.requestDraw(); }
+  zoomBy(factor: number): void {
+    const { w, h } = this.view();
+    if (!this.active || w <= 0 || h <= 0 || !Number.isFinite(factor) || factor <= 0) return;
+    const base = this.fitScale(w, h);
+    this.scale = Math.max(base * 0.5, Math.min(base * 8, this.scale * factor));
+    this.requestDraw();
+  }
+  private fitScale(w: number, h: number): number {
+    return Math.min(w * 0.86 / ((this.bounds.maxX - this.bounds.minX) || 1),
+      h * 0.82 / ((this.bounds.maxY - this.bounds.minY) || 1));
+  }
+  private inputAllowed(target?: EventTarget | null): boolean {
+    if (!this.active || this.container.closest("[hidden], [inert]")) return false;
+    if (document.querySelector('dialog[open], [role="dialog"]:not([hidden])')) return false;
+    const el = target instanceof Element ? target : document.activeElement;
+    return !el?.closest('input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="slider"], [role="combobox"]');
+  }
 
   constructor(container: HTMLElement) {
+    this.container = container;
     this.canvas = container.querySelector("canvas.fieldc")!;
     this.ctx = this.canvas.getContext("2d")!;
     this.tooltip = container.querySelector<HTMLElement>(".tooltip")!;
     this.mathLog = container.querySelector<HTMLElement>(".mathlog")!;
     this.bindInput();
     this.geometry.sync(store.facts.values());
+    this.labels.sync(store.facts.values());
+    this.computeBounds();
     store.on("facts", () => {
       this.geometry.sync(store.facts.values());
+      this.labels.sync(store.facts.values());
       this.computeBounds();
       this.requestDraw();
     });
-    store.on("selection", () => this.requestDraw());
-    store.on("entities", () => this.requestDraw());   // entity highlight lives here
+    store.on("selection", () => this.invalidateLabels());
+    store.on("entities", () => this.invalidateLabels());   // entity highlight lives here
     store.on("trustlens", () => this.requestDraw());
     store.on("halo", () => this.requestDraw());
     store.on("theme", () => this.requestDraw());      // dots re-ink with the room
@@ -71,12 +113,12 @@ export class Field {
 
   /** Schedule one frame; keeps itself alive only while animations run. */
   requestDraw(): void {
-    if (this.rafPending) return;
+    if (!this.active || this.rafPending || this.container.closest("[hidden], [inert]")) return;
     this.rafPending = true;
     requestAnimationFrame(() => {
       this.rafPending = false;
-      this.draw();
-      if (this.effects.length || (store.reasonHalo && !reducedMotion)) {
+      const drawn = this.draw();
+      if (drawn && (this.effects.length || (store.reasonHalo && !reducedMotion))) {
         this.requestDraw();
       }
     });
@@ -86,7 +128,7 @@ export class Field {
 
   private view() {
     const r = this.canvas.getBoundingClientRect();
-    return { w: r.width, h: r.height };
+    return { w: r.width, h: r.height, left: r.left, top: r.top };
   }
 
   toScreen(wx: number, wy: number): [number, number] {
@@ -104,22 +146,29 @@ export class Field {
     for (const f of store.facts.values()) {
       if (f.x !== null && f.y !== null) { xs.push(f.x); ys.push(f.y!); }
     }
+    this.hasProjectedFacts = xs.length > 0;
     if (!xs.length) return;
     this.bounds = {
       minX: Math.min(...xs), maxX: Math.max(...xs),
       minY: Math.min(...ys), maxY: Math.max(...ys),
     };
-    if (this.scale === 1 && this.cx === 0 && this.cy === 0) this.fit();
+
   }
 
   fit(): void {
+    if (!this.active || this.container.closest("[hidden], [inert]")) return;
     const { w, h } = this.view();
+    if (w <= 0 || h <= 0) return;
+    this.fitCamera(w, h);
+    this.requestDraw();
+  }
+
+  private fitCamera(w: number, h: number): void {
+    this.scale = this.fitScale(w, h);
     const b = this.bounds;
-    const spanX = (b.maxX - b.minX) || 1, spanY = (b.maxY - b.minY) || 1;
-    this.scale = Math.min((w * 0.86) / spanX, (h * 0.82) / spanY);
     this.cx = (b.minX + b.maxX) / 2;
     this.cy = (b.minY + b.maxY) / 2;
-    this.requestDraw();
+    if (this.hasProjectedFacts) this.initialFitPending = false;
   }
 
   resetCamera(): void { this.fit(); }
@@ -174,18 +223,22 @@ export class Field {
   private bindInput(): void {
     const c = this.canvas;
     c.addEventListener("wheel", (e) => {
+      if (!this.inputAllowed(e.target)) return;
       e.preventDefault();
-      const [wx, wy] = this.toWorld(e.offsetX, e.offsetY);
+      const { w, h } = this.view();
+      if (w <= 0 || h <= 0) return;
+      const wx = (e.offsetX - w / 2) / this.scale + this.cx;
+      const wy = (e.offsetY - h / 2) / this.scale + this.cy;
       const factor = Math.exp(-e.deltaY * 0.0015);
-      const base = Math.min((this.view().w * 0.86) /
-        ((this.bounds.maxX - this.bounds.minX) || 1), 1e6);
+      const base = this.fitScale(w, h);
       this.scale = Math.max(base * 0.5, Math.min(base * 8, this.scale * factor));
-      const [wx2, wy2] = this.toWorld(e.offsetX, e.offsetY);
-      this.cx += wx - wx2; this.cy += wy - wy2;
+      this.cx += wx - ((e.offsetX - w / 2) / this.scale + this.cx);
+      this.cy += wy - ((e.offsetY - h / 2) / this.scale + this.cy);
       this.requestDraw();
     }, { passive: false });
 
     c.addEventListener("mousedown", (e) => {
+      if (!this.inputAllowed(e.target)) return;
       this.lastMouse = { x: e.offsetX, y: e.offsetY };
       const hit = this.hitTest(e.offsetX, e.offsetY);
       // §3.7: drag on empty space pans; shift+drag = region select;
@@ -202,6 +255,7 @@ export class Field {
     });
 
     c.addEventListener("mousemove", (e) => {
+      if (!this.inputAllowed(e.target)) return;
       const dx = e.offsetX - this.lastMouse.x, dy = e.offsetY - this.lastMouse.y;
       if (this.dragging) {
         this.cx -= dx / this.scale; this.cy -= dy / this.scale;
@@ -224,6 +278,7 @@ export class Field {
     });
 
     c.addEventListener("mouseup", (e) => {
+      if (!this.inputAllowed(e.target)) return;
       if (this.dragRect) {
         const r = this.dragRect; this.dragRect = null;
         this.requestDraw();
@@ -258,8 +313,7 @@ export class Field {
     });
 
     addEventListener("keydown", (e) => {
-      if ((e.target as HTMLElement).tagName === "INPUT" ||
-          (e.target as HTMLElement).tagName === "TEXTAREA") return;
+      if (!this.inputAllowed(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.code === "Space") { this.spaceHeld = true; e.preventDefault(); }
       if (e.key === "0") this.fit();
       if (e.key === "f" && !e.metaKey && !e.ctrlKey) this.fit();
@@ -286,9 +340,13 @@ export class Field {
 
   // -- render --------------------------------------------------------------------
 
-  private draw(): void {
+  private draw(): boolean {
+    if (!this.active || this.container.closest("[hidden], [inert]")) return false;
     const dpr = devicePixelRatio || 1;
-    const { w, h } = this.view();
+    const viewport = this.view();
+    const { w, h } = viewport;
+    if (w <= 0 || h <= 0) return false;
+    if (this.initialFitPending && this.hasProjectedFacts) this.fitCamera(w, h);
     if (this.canvas.width !== w * dpr || this.canvas.height !== h * dpr) {
       this.canvas.width = w * dpr; this.canvas.height = h * dpr;
     }
@@ -324,23 +382,31 @@ export class Field {
       ctx.lineWidth = 20; ctx.stroke();
     }
 
-    // no-vector strip (hover any ring for what this means)
+    // Only visible rings become draws/hits. Browser views retain every fact.
     this.stripHits = [];
-    let ringX = 16;
+    this.nullTotal = 0;
+    const ui = Math.max(0.5, parseFloat(getComputedStyle(document.documentElement).fontSize) / 13 || 1);
     const ringY = h - 18;
+    const capacity = Math.max(0, Math.floor((w - 32) / 10));
     for (const f of store.facts.values()) {
       if (f.has_vector) continue;
+      this.nullTotal++;
+      if (this.stripHits.length >= capacity) continue;
+      const ringX = 16 + this.stripHits.length * 10;
       ctx.beginPath(); ctx.arc(ringX, ringY, 3, 0, Math.PI * 2);
-      ctx.strokeStyle = f.fact_id === this.hoverId
-        ? theme.acting : rgba(theme.inkRgb, 0.6);
+      ctx.strokeStyle = f.fact_id === this.hoverId ? theme.acting : rgba(theme.inkRgb, 0.6);
       ctx.lineWidth = 1; ctx.stroke();
       this.stripHits.push({ x: ringX, y: ringY, id: f.fact_id });
-      ringX += 10;
     }
-    if (ringX > 16) {
-      ctx.fillStyle = rgba(theme.inkRgb, 0.5);
-      ctx.font = "10px ui-monospace, monospace";
-      ctx.fillText("no hrr_vector — hover a ring to see why", ringX + 8, ringY + 3);
+    if (this.nullTotal) {
+      ctx.fillStyle = rgba(theme.inkRgb, 0.7);
+      ctx.font = `${11 * ui}px ui-monospace, monospace`;
+      const caption = `${this.nullTotal} without vectors · ${this.stripHits.length} rings · all in Categories / Timeline`;
+      const line = wrapLabel(caption, Math.max(0, w - 32), 1, text => ctx.measureText(text).width)[0];
+      if (line) ctx.fillText(line, 16, ringY - 14);
+      this.canvas.setAttribute("aria-label", `Fact projection. ${caption}`);
+    } else {
+      this.canvas.setAttribute("aria-label", "Fact projection");
     }
 
     const lens = store.trustLens;
@@ -430,6 +496,24 @@ export class Field {
     }
 
     this.updateTooltip(now, w, h);
+    if (this.labelMode === "auto") {
+      const exclusions: LabelRect[] = [];
+      for (const el of this.container.querySelectorAll<HTMLElement>(".field-title, .context-rail, .context-read, .mathlog, .tooltip, .field-legend, .field-help, .garden-context, #field-context, [data-label-exclusion]")) {
+        if (!el.getClientRects().length || getComputedStyle(el).display === "none") continue;
+        const r = el.getBoundingClientRect();
+        if (r.width && r.height) exclusions.push({ x: r.left - viewport.left, y: r.top - viewport.top, w: r.width, h: r.height });
+      }
+      if (this.nullTotal) exclusions.push({ x: 0, y: h - 38 - 16 * ui, w, h: 38 + 16 * ui });
+      const labels = this.labels.layout(ctx, { w, h, cx: this.cx, cy: this.cy, scale: this.scale, ui,
+        selected: store.selection, hover: this.hoverId, highlighted: store.entityHighlight, exclusions }, this.labelMode);
+      ctx.font = `${12 * ui}px ui-monospace, monospace`;
+      ctx.textBaseline = "top";
+      ctx.fillStyle = rgba(theme.inkRgb, 0.95);
+      for (const label of labels) label.lines.forEach((text, i) => ctx.fillText(text, label.x + 3 * ui, label.y + (3 + i * 16) * ui));
+      ctx.textBaseline = "alphabetic";
+    } else this.labels.layout(ctx, { w, h, cx: this.cx, cy: this.cy, scale: this.scale, ui,
+      selected: store.selection, hover: this.hoverId, highlighted: store.entityHighlight, exclusions: [] }, "off");
+    return true;
   }
 
   private updateTooltip(now: number, w: number, h: number): void {
@@ -447,7 +531,7 @@ export class Field {
       if (!hit) { this.tooltip.style.display = "none"; return; }
       [sx, sy] = [hit.x, hit.y - 8];
       this.tooltip.innerHTML =
-        `<div class="hd">${fid(f.fact_id)} · <span>${f.category}</span> · trust ${f.trust_score.toFixed(2)}</div>` +
+        `<div class="hd">${fid(f.fact_id)} · <span>${escapeHtml(f.category)}</span> · trust ${f.trust_score.toFixed(2)}</div>` +
         `<div>“${escapeHtml(f.content.slice(0, 120))}${f.content.length > 120 ? "…" : ""}”</div>` +
         `<div class="edu">⊘ <b>no HRR vector.</b> This fact was stored while vector ` +
         `encoding was unavailable, so it exists only as text: keyword <i>search</i> still ` +
@@ -456,8 +540,7 @@ export class Field {
         `<div class="edu">Fix: select it and use <b>backfill vector</b> — the Eye re-encodes ` +
         `it from its text + entities (journaled, undoable).</div>`;
       this.tooltip.style.display = "block";
-      this.tooltip.style.left = `${Math.min(sx + 14, w - 264)}px`;
-      this.tooltip.style.top = `${Math.max(12, sy - 150)}px`;
+      this.placeTooltip(sx + 14, sy - 150, w, h);
       return;
     }
 
@@ -470,7 +553,7 @@ export class Field {
       : f.trust_score >= 0.3 ? "mid — recalled normally"
       : "below min_trust 0.3 — filtered from recall";
     this.tooltip.innerHTML =
-      `<div class="hd">${fid(f.fact_id)} · <span>${f.category}</span> · trust ${f.trust_score.toFixed(2)}</div>` +
+      `<div class="hd">${fid(f.fact_id)} · <span>${escapeHtml(f.category)}</span> · trust ${f.trust_score.toFixed(2)}</div>` +
       `<div>“${escapeHtml(f.content.slice(0, 160))}${f.content.length > 160 ? "…" : ""}”</div>` +
       (f.entities.length
         ? `<div class="ents">⊙ entities: ${f.entities.map(escapeHtml).join(", ")}</div>`
@@ -479,13 +562,23 @@ export class Field {
       `<div class="close">trust: ${trustNote}</div>` +
       `<div class="close">seen in ${f.retrieval_count} recall${f.retrieval_count === 1 ? "" : "s"} (journal-observed) · rated helpful ${f.helpful_count}×</div>`;
     this.tooltip.style.display = "block";
-    [sx, sy] = this.toScreen(f.x!, f.y!);
-    this.tooltip.style.left = `${Math.min(sx + 14, w - 264)}px`;
-    this.tooltip.style.top = `${Math.min(sy + 12, h - 170)}px`;
+    [sx, sy] = [(f.x! - this.cx) * this.scale + w / 2, (f.y! - this.cy) * this.scale + h / 2];
+    this.placeTooltip(sx + 14, sy + 12, w, h);
+  }
+  private placeTooltip(x: number, y: number, w: number, h: number): void {
+    this.tooltip.style.maxWidth = `${Math.max(0, w - 24)}px`;
+    this.tooltip.style.maxHeight = `${Math.max(0, h - 24)}px`;
+    this.tooltip.style.boxSizing = "border-box";
+    this.tooltip.style.overflow = "auto";
+    const rect = this.tooltip.getBoundingClientRect();
+    this.tooltip.style.left = `${Math.max(12, Math.min(x, w - rect.width - 12))}px`;
+    this.tooltip.style.top = `${Math.max(12, Math.min(y, h - rect.height - 12))}px`;
   }
 }
 
-export function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
+export function escapeHtml(s: unknown): string {
+  const text = typeof s === "string" ? s : s == null ? "" :
+    typeof s === "number" || typeof s === "boolean" ? String(s) : "[invalid text]";
+  return text.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

@@ -5,7 +5,9 @@ import { rpc, stats, openEvents, resetToken } from "./api";
 import { store, Fact, EyeEvent, fid, initTheme } from "./state";
 import { Field, escapeHtml } from "./field";
 import { Stream, describe } from "./stream";
-import { LeftColumn, Inspect, clearEntityHighlight, clearEntityHighlights } from "./panes";
+import { MemoryExplorer } from "./explorer";
+import { getStored, setStored } from "./storage";
+import { LeftColumn, Inspect, clearEntityHighlight, clearEntityHighlights, closeEntityMenu } from "./panes";
 import { initGarden } from "./garden";
 import { setField, openWorkbench, openBackup, openHelp, openAskAgent,
          openSettings, applyUiPrefs } from "./modals";
@@ -13,6 +15,19 @@ import { setField, openWorkbench, openBackup, openHelp, openAskAgent,
 const $ = (s: string) => document.querySelector<HTMLElement>(s)!;
 
 let field: Field;
+let explorer: MemoryExplorer;
+let inspector: Inspect;
+type CentralView = "field" | "categories" | "timeline";
+type PaneMode = "explore" | "evidence" | "inspect";
+const viewNames: CentralView[] = ["field", "categories", "timeline"];
+const paneNames: PaneMode[] = ["explore", "evidence", "inspect"];
+const savedView = getStored("eyeExploreView");
+const navigation = {
+  view: (viewNames.includes(savedView as CentralView) ? savedView : "field") as CentralView,
+  pane: "explore" as PaneMode,
+  compact: false,
+};
+const paneFocus = new Map<PaneMode, HTMLElement>();
 let reprojectTimer: number | undefined;
 let knownFactIds = new Set<number>();
 let projectionGeneration = 0;
@@ -266,6 +281,9 @@ function findOverlay(): void {
     } else input.removeAttribute("aria-activedescendant");
   };
   input.onkeydown = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      e.preventDefault(); input.select(); return;
+    }
     const rows = [...results.querySelectorAll<HTMLElement>("[data-id]")];
     if (e.key === "Escape") { close(); return; }
     if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rows.length) {
@@ -349,6 +367,160 @@ function initStreamDock(): void {
   apply();
 }
 
+function paneElement(pane: PaneMode): HTMLElement {
+  return $(pane === "explore" ? "#explorer" : pane === "evidence" ? "#pane-left" : "#pane-inspect");
+}
+
+function visibleFocus(el: HTMLElement | undefined): el is HTMLElement {
+  return !!el && el.isConnected && !el.closest("[hidden], [inert]") &&
+    el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" &&
+    !(el as HTMLButtonElement).disabled;
+}
+
+function rememberPaneFocus(): PaneMode | undefined {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return;
+  const owner = paneNames.find((pane) => paneElement(pane).contains(active));
+  if (owner) paneFocus.set(owner, active);
+  return owner;
+}
+
+function focusPane(pane: PaneMode): void {
+  const remembered = paneFocus.get(pane);
+  if (visibleFocus(remembered)) { remembered.focus({ preventScroll: true }); return; }
+  const host = paneElement(pane);
+  const preferred = pane === "explore"
+    ? host.querySelector<HTMLElement>(`[data-view="${navigation.view}"]`)
+    : pane === "evidence" ? host.querySelector<HTMLElement>("#entfilter") : null;
+  if (visibleFocus(preferred ?? undefined)) preferred!.focus({ preventScroll: true });
+  else { host.tabIndex = -1; host.focus({ preventScroll: true }); }
+}
+
+function applyNavigation(): void {
+  const app = $(".app");
+  const exploreVisible = !navigation.compact || navigation.pane === "explore";
+  const browserVisible = exploreVisible && navigation.view !== "field";
+  if (!browserVisible) explorer.setActive(false); // save before CSS selectors can hide an ancestor
+  app.dataset.layout = navigation.compact ? "compact" : "wide";
+  app.dataset.pane = navigation.pane;
+  app.dataset.view = navigation.view;
+  field.setActive(exploreVisible && navigation.view === "field");
+  for (const pane of paneNames) {
+    const host = paneElement(pane);
+    host.hidden = navigation.compact && pane !== navigation.pane;
+    host.inert = host.hidden;
+  }
+  $("#pane-switcher").hidden = !navigation.compact;
+  $("#field-wrap").hidden = navigation.view !== "field";
+  $("#field-wrap").inert = navigation.view !== "field";
+  $("#fact-browser").hidden = navigation.view === "field";
+  $("#fact-browser").inert = navigation.view === "field";
+  $("#field-controls").hidden = navigation.view !== "field";
+  $("#fact-browser").setAttribute("aria-labelledby", `view-${navigation.view}`);
+  if (navigation.view !== "field") explorer.setMode(navigation.view);
+  explorer.setActive(exploreVisible && navigation.view !== "field");
+  document.querySelectorAll<HTMLButtonElement>("#explorer-tabs [data-view]").forEach((button) => {
+    const selected = button.dataset.view === navigation.view;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    button.classList.toggle("active", selected);
+  });
+  document.querySelectorAll<HTMLButtonElement>("#pane-switcher [data-pane]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.pane === navigation.pane));
+  });
+  if (navigation.compact && navigation.pane === "inspect") inspector.revealEmpty();
+}
+
+function setPaneMode(pane: PaneMode, moveFocus = true): void {
+  if (!paneNames.includes(pane)) return;
+  rememberPaneFocus();
+  navigation.pane = pane;
+  applyNavigation();
+  if (moveFocus) focusPane(pane);
+}
+
+function setCentralView(view: CentralView, moveFocus = true): void {
+  if (!viewNames.includes(view)) return;
+  rememberPaneFocus();
+  navigation.view = view;
+  navigation.pane = "explore";
+  setStored("eyeExploreView", view);
+  applyNavigation();
+  if (moveFocus) $("#explorer-tabs").querySelector<HTMLElement>(`[data-view="${view}"]`)?.focus();
+}
+
+function initExploration(): void {
+  const updateSelectionCount = () => {
+    $("#inspect-selection-count").textContent = String(store.selection.size);
+    $("#pane-switcher").querySelector<HTMLElement>('[data-pane="inspect"]')!
+      .setAttribute("aria-label", `Inspect: ${store.selection.size} selected facts`);
+    if (navigation.compact && navigation.pane === "inspect") inspector.revealEmpty();
+  };
+  let layoutFrame: number | null = null;
+  const updateLayout = () => {
+    if (layoutFrame !== null) cancelAnimationFrame(layoutFrame);
+    layoutFrame = null;
+    const scale = Math.max(0.5, parseFloat(getComputedStyle(document.documentElement).fontSize) / 13 || 1);
+    const compact = $(".main").clientWidth < (250 + 304 + 400) * scale + 4;
+    if (compact !== navigation.compact) {
+      const owner = rememberPaneFocus();
+      if (compact && owner) navigation.pane = owner;
+      navigation.compact = compact;
+      applyNavigation();
+    }
+    field.invalidateLabels();
+  };
+  const scheduleLayout = () => {
+    if (layoutFrame !== null) return;
+    layoutFrame = requestAnimationFrame(updateLayout);
+  };
+  // Resolve the pane mode before the resize event's next paint.
+  addEventListener("resize", updateLayout);
+  new ResizeObserver(scheduleLayout).observe($(".main"));
+  new MutationObserver(updateLayout).observe(document.documentElement, {
+    attributes: true, attributeFilter: ["style"],
+  });
+  addEventListener("focusin", rememberPaneFocus);
+  document.querySelectorAll<HTMLButtonElement>("#pane-switcher [data-pane]").forEach((button) => {
+    button.onclick = () => setPaneMode(button.dataset.pane as PaneMode);
+    button.onkeydown = (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const step = event.key === "ArrowRight" ? 1 : -1;
+      const next = paneNames[(paneNames.indexOf(navigation.pane) + step + paneNames.length) % paneNames.length];
+      setPaneMode(next, false);
+      $("#pane-switcher").querySelector<HTMLElement>(`[data-pane="${next}"]`)?.focus();
+    };
+  });
+  document.querySelectorAll<HTMLButtonElement>("#explorer-tabs [data-view]").forEach((button) => {
+    button.onclick = () => setCentralView(button.dataset.view as CentralView);
+    button.onkeydown = (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const index = viewNames.indexOf(navigation.view);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? viewNames.length - 1 :
+        (index + (event.key === "ArrowRight" ? 1 : -1) + viewNames.length) % viewNames.length;
+      setCentralView(viewNames[next]);
+    };
+  });
+  $("#field-zoom-out").onclick = () => field.zoomBy(1 / 1.35);
+  $("#field-zoom-in").onclick = () => field.zoomBy(1.35);
+  $("#field-fit").onclick = () => field.fit();
+  $("#field-text-mode").onclick = () => {
+    field.setLabelMode(field.getLabelMode() === "auto" ? "off" : "auto");
+    $("#field-text-mode").textContent = `Text: ${field.getLabelMode()}`;
+    $("#field-text-mode").setAttribute("aria-pressed", String(field.getLabelMode() === "auto"));
+  };
+  $("#field-text-mode").textContent = `Text: ${field.getLabelMode()}`;
+  $("#field-text-mode").setAttribute("aria-pressed", String(field.getLabelMode() === "auto"));
+  store.on("selection", updateSelectionCount);
+  (window as any).eyeExplorer = explorer;
+  (window as any).eyeNavigation = { status: () => ({ ...navigation }), setView: setCentralView, setPane: setPaneMode };
+  applyNavigation();
+  updateLayout();
+  updateSelectionCount();
+}
+
 function altHistoryBlocked(target: EventTarget | null): boolean {
   const el = target instanceof Element ? target : null;
   if (el?.closest("input, textarea, select, button, [contenteditable]:not([contenteditable='false'])")) return true;
@@ -357,14 +529,26 @@ function altHistoryBlocked(target: EventTarget | null): boolean {
 
 function bindKeys(): void {
   addEventListener("keydown", (e) => {
-    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey &&
-        (e.key === "ArrowLeft" || e.key === "ArrowRight") && !altHistoryBlocked(e.target)) {
-      const moved = store.navigateSelectionHistory(e.key === "ArrowLeft" ? -1 : 1);
-      if (moved) e.preventDefault();
+    if (e.defaultPrevented || document.querySelector(".modal-back")) return;
+    if (e.key === "Escape" && closeTrustLens) {
+      e.preventDefault(); closeTrustLens(); return;
+    }
+    if (document.querySelector(".ctxmenu")) {
+      if (e.key === "Escape") { e.preventDefault(); closeEntityMenu(); }
       return;
     }
-    const inInput = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement).tagName) ||
-      (e.target as HTMLElement).isContentEditable;
+    if (document.querySelector(".find-overlay")) {
+      if (e.key === "Escape") { e.preventDefault(); closeFind?.(); }
+      return;
+    }
+    if (document.querySelector(".lens-pop")) return;
+    const target = e.target instanceof Element ? e.target : null;
+    if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight") && !altHistoryBlocked(e.target)) {
+      if (store.navigateSelectionHistory(e.key === "ArrowLeft" ? -1 : 1)) e.preventDefault();
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r" && !e.shiftKey) {
       e.preventDefault(); openWorkbench(); return;
     }
@@ -373,24 +557,20 @@ function bindKeys(): void {
     }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "e") {
       e.preventDefault();
+      if (navigation.compact) setPaneMode("inspect", false);
       $("#pane-inspect").querySelector<HTMLElement>("#edit-content")?.click();
       return;
     }
-    if (inInput) return;
+    if (target?.closest("button, a, [role='button']")) return;
     if (e.key === "?") openHelp();
-    if (e.key === "F") {
-      // preventDefault or the opening "F" lands in the focused input
-      // and every search silently becomes "F…" (caught by break-test)
-      e.preventDefault();
-      findOverlay();
-    }
+    if (e.key === "F") { e.preventDefault(); findOverlay(); }
     if (e.key === "R") {
-      const f = store.focusedFact ? store.facts.get(store.focusedFact) : null;
-      openWorkbench(f?.entities.slice(0, 2) ?? []);
+      const fact = store.focusedFact ? store.facts.get(store.focusedFact) : null;
+      openWorkbench(fact?.entities.slice(0, 2) ?? []);
     }
-    if (e.key === "Escape" && !document.querySelector(".modal-back")) {
-      store.clearSelection();
-      clearEntityHighlights();
+    if (e.key === "Escape") {
+      if (navigation.compact && navigation.pane !== "explore") setPaneMode("explore");
+      else if (navigation.view === "field") { store.clearSelection(); clearEntityHighlights(); }
     }
   });
 }
@@ -403,7 +583,9 @@ async function boot(): Promise<void> {
   setField(field);
   new Stream($("#stream"));
   new LeftColumn($("#pane-left"));
-  new Inspect($("#pane-inspect"));
+  inspector = new Inspect($("#pane-inspect"));
+  explorer = new MemoryExplorer($("#fact-browser"));
+  initExploration();
   initGarden();   // after prefs: respects body.no-garden
 
   (window as any).eyeRefresh = async () => {

@@ -15,6 +15,7 @@ try {
 }
 </script>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="explorer.css">
 <link rel="icon" href="favicon.png">
 </head>
 <body>
@@ -34,9 +35,29 @@ try {
       <button type="button" class="header-action" id="sb-help" title="Open manual · ?">manual</button>
     </nav>
   </header>
+  <nav id="pane-switcher" aria-label="Workspace panes">
+    <button type="button" data-pane="explore" aria-controls="explorer" aria-pressed="true">Explore</button>
+    <button type="button" data-pane="evidence" aria-controls="pane-left" aria-pressed="false">Evidence</button>
+    <button type="button" data-pane="inspect" aria-controls="pane-inspect" aria-pressed="false">Inspect <span id="inspect-selection-count">0</span></button>
+  </nav>
   <main class="main">
     <aside class="pane" id="pane-left" aria-label="Evidence bench"></aside>
-    <section class="field-wrap" id="field-wrap" aria-label="The Field">
+    <section id="explorer" aria-label="Explore" tabindex="-1">
+      <div id="explorer-toolbar">
+        <nav id="explorer-tabs" role="tablist" aria-label="Memory views">
+          <button type="button" id="view-field" role="tab" data-view="field" aria-controls="field-wrap" aria-selected="true">Field</button>
+          <button type="button" id="view-categories" role="tab" data-view="categories" aria-controls="fact-browser" aria-selected="false" tabindex="-1">Categories</button>
+          <button type="button" id="view-timeline" role="tab" data-view="timeline" aria-controls="fact-browser" aria-selected="false" tabindex="-1">Timeline</button>
+        </nav>
+        <div id="field-controls" role="group" aria-label="Field controls">
+          <button type="button" id="field-zoom-out" aria-label="Zoom out">−</button>
+          <button type="button" id="field-zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" id="field-fit">Fit</button>
+          <button type="button" id="field-text-mode" aria-pressed="true">Text: auto</button>
+        </div>
+      </div>
+      <div id="explorer-panels">
+    <section class="field-wrap" id="field-wrap" role="tabpanel" aria-labelledby="view-field">
       <canvas class="vine vine-l" aria-hidden="true"></canvas>
       <canvas class="vine vine-r" aria-hidden="true"></canvas>
       <canvas class="cottage-c" aria-hidden="true"></canvas>
@@ -45,6 +66,9 @@ try {
       <canvas class="fieldc" aria-label="Fact projection"></canvas>
       <div class="tooltip" style="display:none"></div>
       <pre class="mathlog"></pre>
+    </section>
+        <section id="fact-browser" role="tabpanel" aria-label="Memory browser" tabindex="-1" hidden inert></section>
+      </div>
       <section class="boot-error" id="boot-error" role="alert" hidden>
         <h1>The Eye could not attach</h1>
         <p id="boot-error-message"></p>

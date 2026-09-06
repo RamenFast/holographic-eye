@@ -24,6 +24,20 @@ function modalIsOpen(back: HTMLElement): boolean {
   return document.contains(back) && modalClosers.has(back);
 }
 
+function visibleFocusTarget(el: HTMLElement): boolean {
+  return document.contains(el) && !el.closest('[hidden], [inert], [aria-hidden="true"]') &&
+    !el.matches(":disabled") && el.getClientRects().length > 0 &&
+    getComputedStyle(el).visibility !== "hidden";
+}
+
+function restoreFocus(prior: HTMLElement | null): void {
+  const fallback = [...document.querySelectorAll<HTMLElement>(
+    '#pane-switcher button[aria-pressed="true"], #pane-switcher button[aria-selected="true"], #explorer-tabs [aria-selected="true"], #pane-left .tab.active, #pane-inspect button',
+  )].find(visibleFocusTarget) ?? document.getElementById("sb-settings");
+  const target = prior && visibleFocusTarget(prior) ? prior : fallback;
+  target?.focus({ preventScroll: true });
+}
+
 function modal(title: string, body: string, width = 720): HTMLElement {
   activeModalClose?.();
   const priorFocus = document.activeElement instanceof HTMLElement
@@ -32,7 +46,7 @@ function modal(title: string, body: string, width = 720): HTMLElement {
   const titleId = `eye-modal-title-${++modalSerial}`;
   back.className = "modal-back";
   back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="${titleId}" tabindex="-1" style="width:${width}px">
-    <div class="m-title" id="${titleId}">${title}<button type="button" class="m-close" aria-label="Close dialog" style="background:none;border:0;font:inherit;padding:0">esc ✕</button></div>
+    <div class="m-title"><h1 class="m-title-text" id="${titleId}">${escapeHtml(title)}</h1><button type="button" class="m-close" aria-label="Close dialog" style="background:none;border:0;font:inherit;padding:0">esc ✕</button></div>
     <div class="m-body">${body}</div></div>`;
   document.body.appendChild(back);
 
@@ -50,11 +64,11 @@ function modal(title: string, body: string, width = 720): HTMLElement {
       store.emit("halo");
       fieldRef?.logMath([]);
     }
-    if (priorFocus && document.contains(priorFocus)) priorFocus.focus();
+    restoreFocus(priorFocus);
   };
   const focusable = () => [...back.querySelectorAll<HTMLElement>(
     'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
-  )].filter((el) => !el.hasAttribute("hidden"));
+  )].filter(visibleFocusTarget);
   const onKeydown = (event: KeyboardEvent) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -87,7 +101,7 @@ function modal(title: string, body: string, width = 720): HTMLElement {
   queueMicrotask(() => {
     if (!modalIsOpen(back)) return;
     const preferred = back.querySelector<HTMLElement>("input:not([type=range]), textarea, select, button.commit");
-    (preferred ?? focusable()[0] ?? back.querySelector<HTMLElement>(".modal"))?.focus();
+    (preferred && visibleFocusTarget(preferred) ? preferred : focusable()[0] ?? back.querySelector<HTMLElement>(".modal"))?.focus({ preventScroll: true });
   });
   return back;
 }
@@ -660,7 +674,7 @@ export function openSettings(): void {
         : "The geometry kernel is still loading. Settings reads this status when opened.";
   const back = modal("⚙ SETTINGS", `
     <div class="q-body dim">switches and controls only — the field legend, keys, and
-      terminology live in the <a id="st-manual">? manual</a> (one canonical copy).</div>
+      terminology live in the <button type="button" class="text-action" id="st-manual">? manual</button> (one canonical copy).</div>
 
     <div class="ep-label">appearance</div>
     <div class="st-row"><span class="st-k">theme</span>

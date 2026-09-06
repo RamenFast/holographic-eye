@@ -4,6 +4,7 @@
 
 import { rpc, toolRead } from "./api";
 import { getStored, setStored } from "./storage";
+import { categoryKey, categoryLabel } from "./explorer-data";
 import { store, fid, EyeEvent, CAT_HUES, catColor } from "./state";
 import { escapeHtml } from "./field";
 import { openWorkbench, openFft, openEditPreview, openDeleteModal } from "./modals";
@@ -82,6 +83,9 @@ export class LeftColumn {
   }
 
   render(): void {
+    const focused = document.activeElement;
+    const filterFocus = focused instanceof HTMLInputElement && focused.id === "entfilter" && this.el.contains(focused)
+      ? { start: focused.selectionStart, end: focused.selectionEnd } : null;
     const badge = this.queueEvents()
       .filter((e) => new Date(e.ts).getTime() > this.lastReviewed && !e.undone_by).length;
     let body = "";
@@ -113,6 +117,13 @@ export class LeftColumn {
       };
     });
     this.bind();
+    if (filterFocus) {
+      const input = this.el.querySelector<HTMLInputElement>("#entfilter");
+      if (input && !input.closest("[hidden], [inert]")) {
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(filterFocus.start, filterFocus.end);
+      }
+    }
   }
 
   private renderEntities(): string {
@@ -384,16 +395,28 @@ export function clearEntityHighlights(): void {
   store.emit("entities");
 }
 
+let entityMenuClose: (() => void) | null = null;
+export function closeEntityMenu(): void { entityMenuClose?.(); }
+
 function entityMenu(e: MouseEvent, entityId: number, name: string): void {
-  document.querySelector(".ctxmenu")?.remove();
+  closeEntityMenu();
   const menu = h(`<div class="ctxmenu" style="left:${e.clientX}px;top:${e.clientY}px">
     <div data-act="filter">filter field to this entity</div>
     <div data-act="rename">rename / merge…</div>
     <div data-act="remove">remove entity</div>
     <div data-act="copy">copy name</div></div>`);
   document.body.appendChild(menu);
-  const close = () => menu.remove();
-  setTimeout(() => addEventListener("click", close, { once: true }));
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(e.clientX, innerWidth - rect.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(e.clientY, innerHeight - rect.height - 8))}px`;
+  const close = () => {
+    clearTimeout(clickTimer);
+    removeEventListener("click", close);
+    menu.remove();
+    if (entityMenuClose === close) entityMenuClose = null;
+  };
+  const clickTimer = window.setTimeout(() => addEventListener("click", close));
+  entityMenuClose = close;
   menu.querySelectorAll<HTMLElement>("[data-act]").forEach((item) => {
     item.onclick = async () => {
       close();
@@ -440,6 +463,12 @@ export class Inspect {
     store.on("selection", () => this.render());
     store.on("facts", () => this.render());
     this.render();
+  }
+
+  revealEmpty(): void {
+    if (store.selection.size || this.manualOpen) return;
+    this.manualOpen = true;
+    void this.render();
   }
 
   private setOpen(open: boolean): void {
@@ -492,7 +521,7 @@ export class Inspect {
         return;
       }
       this.el.innerHTML = `${this.header(false)}
-        <div class="inspect-empty"><p>Select a Field point to inspect its evidence.</p>
+        <div class="inspect-empty"><p>Select a fact in any view to inspect its evidence.</p>
         <p>Drag across the Field for an aggregate view.</p></div>`;
       this.bindHeader(false);
       return;
@@ -535,7 +564,7 @@ export class Inspect {
         <section class="inspect-band identity-band" aria-labelledby="inspect-identity">
           <h2 id="inspect-identity">Identity</h2>
           <div class="factid">${fid(id)}</div>
-          <div class="chips"><span class="chip-cat" style="color:${catInk}">${escapeHtml(fact.category.toUpperCase())}</span></div>
+          <div class="chips"><span class="chip-cat" style="color:${catInk}">${escapeHtml(categoryLabel(categoryKey(fact.category)).toUpperCase())}</span></div>
           <div class="tags">${escapeHtml(fact.tags || "no tags")}</div>
           <div class="content" id="ins-content">${escapeHtml(fact.content)}</div>
           <div class="editlinks" aria-label="Edit fact">
@@ -552,7 +581,7 @@ export class Inspect {
             <span class="k">retrievals</span><span class="v">${fact.journal_retrievals ?? local?.retrieval_count ?? 0}× <span class="k">journal-observed</span></span>
             <span class="k">helpful</span><span class="v">${fact.helpful_count}×</span>
           </div>
-          <div class="ts">created&nbsp;&nbsp;${fact.created_at}<br>updated&nbsp;&nbsp;${fact.updated_at}</div>
+          <div class="ts">created&nbsp;&nbsp;${escapeHtml(fact.created_at)}<br>updated&nbsp;&nbsp;${escapeHtml(fact.updated_at)}</div>
           <div class="ent-chips" aria-label="Linked entities">${entChips}</div>
           <div class="vecline">hrr_vector&nbsp;&nbsp;${fact.vector_bytes ? `${fact.vector_bytes} B (${store.stats.hrr_dim ?? 1024} × f64)` : "NULL — not in the algebra"}</div>
           <div class="linkrow">

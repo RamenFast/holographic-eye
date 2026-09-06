@@ -11,7 +11,9 @@ hit-testing kernel. The provider stays outside Hermes core.
 
 ## The cockpit
 
-- **Field:** real PCA coordinates, pan, zoom, selection, entity highlights, and a trust lens.
+- **Field:** real PCA coordinates, pan, zoom, selection, entity highlights, and a trust lens. Readable content snippets appear when space permits; Text can turn them off.
+- **Categories and Timeline:** browse loaded facts by exact category or stored/updated UTC metadata, with local filters and bounded pages. Unknown dates remain explicit.
+- **Narrow windows:** switch between Explore, Evidence, and Inspect without losing selection. Dialog headers and close controls stay visible.
 - **Evidence bench:** Entities, Queue, and Contradictions. Open the next layer without losing the Field.
 - **Inspect:** fact anatomy, 50-step back/forward history, edit previews, trust controls, and typed-ID deletion.
 - **Stream:** a compact latest-event glance, expandable journal, and direct navigation to returned facts.
@@ -23,19 +25,23 @@ The Field's Zig kernel changes hit testing, not the stored vectors or PCA.
 If WebAssembly cannot load, the same JavaScript selection algorithm remains available.
 Settings reports the active geometry engine.
 
+[Categories at 640×480](docs/categories-narrow.png) · [Timeline at 640×480](docs/timeline-narrow.png)
+
+These screenshots use synthetic facts at 125% text scale. Timeline dates describe stored metadata, not event history.
+
 ## Install
 
 The DEB/RPM installs the native shell. The provider and served interface are a separate,
-user-level installation inside Hermes. Upgrade both for the complete interface update.
+user-level installation inside Hermes. Version 1.2 updates the shell and frontend; the provider/API remains 1.1.0. Existing 1.1 installations do not need a gateway restart.
 
 ### Desktop package
 
 ```bash
 # Debian / Ubuntu / Mint
-sudo apt install ./holographic-eye_1.1.0_amd64.deb
+sudo apt install ./holographic-eye_1.2.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install ./holographic-eye-1.1.0-1.x86_64.rpm
+sudo dnf install ./holographic-eye-1.2.0-1.x86_64.rpm
 
 # Verify the installed shell
 holographic-eye version --json
@@ -45,7 +51,20 @@ holographic-eye status --json
 Linux Mint is the tested host. RPM payload validation does not prove a Fedora runtime install.
 The package also installs the desktop entry, icons, and `man holographic-eye`.
 
-### Provider and interface
+### Existing 1.1 installation: frontend-only update
+
+Save any Eye drafts and close its window, not Hermes. Build the frontend from this source tree as shown below. Back up the current assets, then copy only the new frontend:
+
+```bash
+front="$HOME/.hermes/plugins/holographic-eye/frontend"
+backup="$HOME/.hermes/.eye-frontend-before-1.2-$(date +%Y%m%d-%H%M%S)"
+cp -a "$front" "$backup"
+rsync -a --delete build/eye_frontend/dist/ "$front/"
+```
+
+Reopen Eye. Keep the backup until verified. This does not update provider code, memory databases, or the gateway process.
+
+### First installation: provider and interface
 
 Requires the Hermes holographic provider, NumPy, and a working Hermes gateway.
 The optional `threadpoolctl` package limits projection BLAS work to two threads during the SVD.
@@ -131,7 +150,12 @@ never copy a backup over a live WAL database or discard newer valid memory durin
 npm --prefix build/eye_frontend run check
 npm --prefix build/verify ci
 node build/verify/gui_edge.cjs
+node build/verify/test_responsive_views.cjs
+node build/verify/test_explorer_data.cjs
+node build/verify/test_field_labels.cjs
 node build/verify/perf_frontend.cjs
+# Longer warmed, alternating-order component comparison:
+EYE_PERF_LONG=1 node build/verify/perf_frontend.cjs
 node build/eye_geometry/test.mjs
 ```
 

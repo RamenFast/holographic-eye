@@ -2,8 +2,17 @@
 "use strict";
 
 /* Synthetic, offline frontend performance comparison.
-   Baseline defaults to v1.0.3. Candidate is the working tree. This script
-   never reads a Hermes token/database and never connects to :8770. */
+   Baseline defaults to v1.1.0. Candidate is the working tree. This script
+   never reads a Hermes token/database and never connects to :8770.
+
+   Scope: v1.1.0 Field/Stream versus candidate Field/Stream under the SAME
+   current UI/state/geometry. This is NOT a whole-release comparison or a
+   claim of new-feature parity. Both arms force labels OFF at construction.
+   The legacy adapter only accepts an active Field, OFF text, and label-cache
+   invalidation (a no-op). Zoom/new views are intentionally unsupported here.
+   Every fixture fact has a vector and real coordinates, so exact full-canvas
+   hashes exclude the intentionally changed vectorless caption by DATA, not
+   by masking a mismatch. Null-vector behavior has its own Field/Explorer tests. */
 
 const { chromium } = require("playwright-core");
 const { execFileSync } = require("child_process");
@@ -16,12 +25,32 @@ const REPO = path.resolve(__dirname, "../..");
 const FRONTEND = path.join(REPO, "build/eye_frontend");
 const ESBUILD = path.join(FRONTEND, "node_modules/.bin/esbuild");
 const BROWSER = process.env.EYE_BROWSER || "/usr/bin/thorium-browser";
-const BASELINE_REF = process.env.EYE_PERF_BASELINE || "v1.0.3";
+const BASELINE_REF = process.env.EYE_PERF_BASELINE || "v1.1.0";
 const FACTS = Number(process.env.EYE_PERF_FACTS || 5000);
 const EVENTS = Number(process.env.EYE_PERF_EVENTS || 120);
-const RUNS = Number(process.env.EYE_PERF_RUNS || 3);
+// Opt-in diagnostic. The original short comparison remains the default.
+const LONG = process.env.EYE_PERF_LONG === "1";
+const RUNS = Number(process.env.EYE_PERF_RUNS || (LONG ? 6 : 3));
+const DRAW_WARMUP = LONG ? 20 : 0;
+const DRAW_SAMPLES = LONG ? 40 : 5;
 const KEEP = process.env.EYE_PERF_KEEP === "1";
 const TOKEN = "synthetic-perf-token";
+const ADAPTER = `
+// Test-only presentation bridge. The inherited renderer/hit/input code is unchanged.
+export class Field extends LegacyField {
+  setActive(active: boolean): void {
+    if (!active) throw new Error("Baseline adapter requires an active Field");
+  }
+  setLabelMode(mode: "auto" | "off"): void {
+    if (mode !== "off") throw new Error("Baseline adapter only supports labels OFF");
+  }
+  getLabelMode(): "off" { return "off"; }
+  invalidateLabels(): void {}
+  zoomBy(_factor: number): void {
+    throw new Error("Baseline adapter does not compare the new zoom controls");
+  }
+}
+`;
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "holo-eye-perf-"));
 
 function median(xs) {
@@ -35,16 +64,27 @@ function stage(name, baseline) {
   fs.cpSync(path.join(FRONTEND, "src"), path.join(dir, "src"), { recursive: true });
   if (baseline) {
     for (const file of ["field.ts", "stream.ts"]) {
-      const text = execFileSync("git", ["show", `${BASELINE_REF}:build/eye_frontend/src/${file}`],
-                                { cwd: REPO, encoding: "utf8" });
+      let text = execFileSync("git", ["show", `${BASELINE_REF}:build/eye_frontend/src/${file}`],
+                                { cwd: REPO, encoding: "utf8", timeout: 60000 });
+      if (file === "field.ts") {
+        if (text.split("export class Field {").length !== 2)
+          throw new Error("Legacy Field declaration changed. Review the compatibility adapter before comparing.");
+        text = text.replace("export class Field {", "class LegacyField {") + ADAPTER;
+      }
       fs.writeFileSync(path.join(dir, "src", file), text);
     }
   }
+  // Apply identical benchmark-only presentation setup before either first draw.
+  const mainPath = path.join(dir, "src/main.ts");
+  const main = fs.readFileSync(mainPath, "utf8");
+  const constructor = 'field = new Field($("#field-wrap"));';
+  if (main.split(constructor).length !== 2) throw new Error("Review the labels-OFF construction hook.");
+  fs.writeFileSync(mainPath, main.replace(constructor, constructor + '\n  field.setLabelMode("off");'));
   fs.mkdirSync(path.join(dir, "dist"));
   execFileSync(ESBUILD, [path.join(dir, "src/main.ts"), "--bundle", "--format=iife",
     `--outfile=${path.join(dir, "dist/bundle.js")}`, "--minify", "--target=es2022"],
-    { stdio: "pipe" });
-  for (const file of ["index.html", "styles.css", "favicon.png"]) {
+    { stdio: "pipe", timeout: 60000 });
+  for (const file of ["index.html", "styles.css", "explorer.css", "favicon.png"]) {
     fs.copyFileSync(path.join(FRONTEND, file), path.join(dir, "dist", file));
   }
   const wasm = path.join(REPO, "build/eye_geometry/zig-out/geometry.wasm");
@@ -56,7 +96,7 @@ function fact(id) {
   const a = id * 2.399963229728653;
   return {
     fact_id: id, x: Math.cos(a) * (20 + Math.sqrt(id)),
-    y: Math.sin(a) * (20 + Math.sqrt(id)), has_vector: id % 97 !== 0,
+    y: Math.sin(a) * (20 + Math.sqrt(id)), has_vector: true,
     content: `synthetic fact ${id} alpha beta`,
     category: ["general", "user_pref", "project", "tool", "lesson"][id % 5],
     tags: "synthetic", trust_score: (id % 11) / 10,
@@ -93,7 +133,10 @@ class Server {
     await new Promise((resolve) => this.server.listen(0, "127.0.0.1", resolve));
     return this.server.address().port;
   }
-  stop() { return new Promise((resolve) => this.server.close(resolve)); }
+  stop() {
+    this.server.closeAllConnections();
+    return new Promise((resolve) => this.server.close(resolve));
+  }
   json(res, body) {
     const data = Buffer.from(JSON.stringify(body));
     res.writeHead(200, { "Content-Type": "application/json", "Content-Length": data.length,
@@ -140,9 +183,11 @@ async function one(dist) {
   let browser;
   try {
   const port = await server.start();
-  browser = await chromium.launch({ executablePath: BROWSER, headless: true,
+  browser = await chromium.launch({ executablePath: BROWSER, headless: true, timeout: 30000,
     args: ["--no-sandbox", "--disable-gpu"] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  page.setDefaultTimeout(20000);
+  page.setDefaultNavigationTimeout(30000);
   await page.addInitScript((token) => {
     localStorage.setItem("eyeToken", token);
     class FakeWebSocket {
@@ -153,6 +198,8 @@ async function one(dist) {
     }
     Object.defineProperty(window, "WebSocket", { value: FakeWebSocket });
   }, TOKEN);
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(String(error)));
   const started = performance.now();
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "load" });
   await page.waitForFunction((n) => document.querySelectorAll(".s-line").length === Math.min(n, 200), EVENTS,
@@ -176,20 +223,25 @@ async function one(dist) {
   const burstApplyMs = performance.now() - burstStarted;
   await page.waitForFunction(() => typeof window.eyeField.geometryStatus !== "function" ||
     window.eyeField.geometryStatus().mode !== "loading");
-  const sample = await page.evaluate(async () => {
+  const sample = await page.evaluate(async ({ warmup, samples }) => {
     const f = window.eyeField;
+    if (f.getLabelMode() !== "off") throw new Error("Geometry comparison requires labels OFF");
+    // Normalize the camera through each arm's existing fit API, after UI boot.
+    f.fit();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const canvas = document.querySelector("canvas.fieldc");
     const ctx = canvas.getContext("2d");
-    const times = (fn, n) => {
-      const out = [];
-      for (let i = 0; i < n; i++) { const t = performance.now(); fn(); out.push(performance.now() - t); }
-      out.sort((a, b) => a - b);
-      return out[Math.floor(out.length / 2)];
-    };
     let rects = 0;
     const originalRect = canvas.getBoundingClientRect.bind(canvas);
     canvas.getBoundingClientRect = () => { rects++; return originalRect(); };
-    const drawMs = times(() => f.draw(), 5);
+    for (let i = 0; i < warmup; i++) f.draw();
+    const drawTimes = [];
+    for (let i = 0; i < samples; i++) {
+      const t = performance.now(); f.draw(); drawTimes.push(performance.now() - t);
+    }
+    const sortedDrawTimes = [...drawTimes].sort((a, b) => a - b);
+    const drawMs = sortedDrawTimes[Math.floor(sortedDrawTimes.length / 2)];
+    const drawP95Ms = sortedDrawTimes[Math.floor(sortedDrawTimes.length * 0.95)];
     rects = 0;
     f.draw();
     const drawRects = rects;
@@ -214,8 +266,9 @@ async function one(dist) {
     const digest = await crypto.subtle.digest("SHA-256", data);
     const pixelHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
     const geometry = typeof f.geometryStatus === "function" ? f.geometryStatus() : null;
-    return { drawMs, hitMs, hitChecksum, drawRects, hitRects, probes, pixelHash, geometry };
-  });
+    return { drawMs, drawP95Ms, drawTimes, hitMs, hitChecksum, drawRects, hitRects, probes, pixelHash, geometry };
+  }, { warmup: DRAW_WARMUP, samples: DRAW_SAMPLES });
+  if (pageErrors.length) throw new Error(`Benchmark page errors: ${pageErrors.join("; ")}`);
   return { bootMs, tailApplyMs, burstApplyMs, ...sample };
   } finally {
     try { await browser?.close(); }
@@ -228,9 +281,11 @@ async function candidateChecks(dist) {
   let browser;
   try {
   const port = await server.start();
-  browser = await chromium.launch({ executablePath: BROWSER, headless: true,
+  browser = await chromium.launch({ executablePath: BROWSER, headless: true, timeout: 30000,
     args: ["--no-sandbox", "--disable-gpu"] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  page.setDefaultTimeout(20000);
+  page.setDefaultNavigationTimeout(30000);
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(String(error)));
   await page.addInitScript((token) => {
@@ -338,17 +393,21 @@ async function candidateChecks(dist) {
 }
 
 (async () => {
+  try {
   if (!Number.isSafeInteger(FACTS) || FACTS < 12 || !Number.isSafeInteger(EVENTS) || EVENTS < 10 ||
       !Number.isSafeInteger(RUNS) || RUNS < 1) throw new Error("FACTS>=12, EVENTS>=10, RUNS>=1 required");
   const baselineDist = stage("baseline", true);
   const candidateDist = stage("candidate", false);
   const values = { baseline: [], candidate: [] };
-  // Alternate isolated browser processes to limit warm-order bias.
+  const pairOrder = [];
   for (let i = 0; i < RUNS; i++) {
-    values.baseline.push(await one(baselineDist));
-    values.candidate.push(await one(candidateDist));
+    // LONG alternates B/C then C/B. Pair index still aligns exact parity checks.
+    const order = LONG && i % 2 ? ["candidate", "baseline"] : ["baseline", "candidate"];
+    pairOrder.push(order);
+    for (const variant of order)
+      values[variant].push(await one(variant === "baseline" ? baselineDist : candidateDist));
   }
-  const keys = ["bootMs", "tailApplyMs", "burstApplyMs", "drawMs", "hitMs", "drawRects", "hitRects"];
+  const keys = ["bootMs", "tailApplyMs", "burstApplyMs", "drawMs", "drawP95Ms", "hitMs", "drawRects", "hitRects"];
   const summary = {};
   for (const variant of ["baseline", "candidate"]) {
     summary[variant] = {};
@@ -372,14 +431,22 @@ async function candidateChecks(dist) {
   const ok = Object.values(correctness).every(Boolean);
   console.log(JSON.stringify({ status: ok ? "ok" : "error", tool: "perf_frontend",
     version: "1", ts: new Date().toISOString(), fixture: { facts: FACTS, events: EVENTS,
-    runs: RUNS, viewport: "1440x900", baselineRef: BASELINE_REF }, summary, raw: values,
+    runs: RUNS, viewport: "1440x900", baselineRef: BASELINE_REF,
+    measurement: { mode: LONG ? "long diagnostic; supplements earlier short results" : "original short",
+      untimedDrawWarmup: DRAW_WARMUP, drawSamplesPerArmPerRun: DRAW_SAMPLES, pairOrder,
+      timingScope: "synchronous canvas command submission, not frame presentation latency" },
+    vectors: "all facts have vectors; vectorless caption deliberately outside this fixture",
+    labels: "off in both arms from construction" },
+    comparison: { scope: "Field/Stream modules under current UI/state/geometry, not whole releases or new-feature parity",
+      baselineAdapter: ADAPTER, camera: "each arm fit() after boot", pixels: "exact full canvas, no crop or tolerance" }, summary, raw: values,
     checks, correctness, artifacts: KEEP ? root : "removed" }, null, 2));
-  if (!KEEP) fs.rmSync(root, { recursive: true, force: true });
-  process.exit(ok ? 0 : 1);
+  process.exitCode = ok ? 0 : 1;
+  } finally {
+    if (!KEEP) fs.rmSync(root, { recursive: true, force: true });
+  }
 })().catch((error) => {
   console.error(JSON.stringify({ status: "error", tool: "perf_frontend", version: "1",
     ts: new Date().toISOString(), error: String(error.stack || error),
     fix: "Run from the repository with npm install completed in build/eye_frontend and build/verify." }));
-  if (!KEEP) fs.rmSync(root, { recursive: true, force: true });
-  process.exit(2);
+  process.exitCode = 2;
 });

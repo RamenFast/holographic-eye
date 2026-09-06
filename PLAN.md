@@ -1864,3 +1864,9 @@ Malformed or negative acknowledgments keep the outcome unknown and block identic
 After a confirmed agent request, rendering or read-refresh failures must not re-enable sending.
 Browser storage is best effort. Denied persistence keeps token and preferences in memory for the current page.
 Clear in-memory authentication before attempting persistent token removal.
+
+
+## D-0018 · Responsive exploration (installed; publication pending)
+
+Ben requests usable floating-view title bars, narrow layouts, zoomed fact text, and category/timeline views.
+The next-pass contract is `docs/dev/next-ui-pass/SPEC.md`. Memory data and provider behavior remain protected.
