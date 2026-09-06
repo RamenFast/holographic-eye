@@ -321,22 +321,23 @@ const FALLBACK_HUES: [number, number][] = [
 /** Category color, trust-saturated, tuned per light/dark room:
     on dark grounds trust brightens the dot; on light grounds trust
     deepens it — vivid always means trusted. */
-export function catColor(category: string, trust: number, alpha = 1): string {
-  let hs = CAT_HUES[category];
+export function catColor(category: unknown, trust: number, alpha = 1): string {
+  const name = typeof category === "string" ? category : "general";
+  let hs = Object.prototype.hasOwnProperty.call(CAT_HUES, name) ? CAT_HUES[name] : undefined;
   if (!hs) {
     let h = 0;
-    for (const ch of category) h = (h * 31 + ch.charCodeAt(0)) % FALLBACK_HUES.length;
+    for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % FALLBACK_HUES.length;
     hs = FALLBACK_HUES[h];
   }
   const [hue, baseSat] = hs;
   const dark = theme?.dark ?? true;
   const sat = baseSat * (0.4 + trust * 0.6) / 0.7 * (dark ? 1 : 1.25);
   const lit = dark
-    ? (category === "tool" ? 72 * (0.55 + trust * 0.5)
-       : category === "general" ? 50 * (0.6 + trust * 0.6)
+    ? (name === "tool" ? 72 * (0.55 + trust * 0.5)
+       : name === "general" ? 50 * (0.6 + trust * 0.6)
        : 38 + trust * 34)
-    : (category === "tool" ? 52 - trust * 22
-       : category === "general" ? 55 - trust * 25
+    : (name === "tool" ? 52 - trust * 22
+       : name === "general" ? 55 - trust * 25
        : 62 - trust * 28);
   return `hsla(${hue}, ${sat}%, ${dark ? Math.min(lit, 80) : Math.max(lit, 22)}%, ${alpha})`;
 }

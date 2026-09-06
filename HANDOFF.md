@@ -1,59 +1,28 @@
-# Holographic Eye handoff · 1.1.0
+# Holographic Eye handoff · 1.2.0
 
 ## Installed state
+- Native DEB shell and served frontend: **1.2.0**, installed and verified.
+- Memory provider/API: **1.1.0**, unchanged. Gateway PID 4025645 was preserved.
+- No database writes, replacement, migration, token changes, or service restart were performed by this pass.
+- Existing Eye windows were not closed or reloaded. Reopen Eye to load the new interface.
+- Release reference: [v1.2.0](https://github.com/RamenFast/holographic-eye/releases/tag/v1.2.0). See the release page for publication state.
 
-- Native DEB shell: **1.1.0**, installed and verified.
-- Gateway provider and served frontend: **1.1.0**, active and read-only verified.
-- Native WebKitGTK Settings reports **Zig/WASM** with the current packed fact count.
-- GitHub release: **v1.1.0**, with DEB, RPM, source, and SHA256SUMS. See the release page for publication state.
-- No database replacement or schema migration occurred. Other Hermes sessions were not stopped.
-
-The provider tree was staged outside plugin discovery and exchanged atomically.
-Only the idle gateway restarted. Dashboard, bridge, and relay process IDs were preserved.
-Existing interactive CLI processes can retain their already-loaded older provider until natural exit.
+## New interface
+Narrow windows use Explore/Evidence/Inspect modes. Dialog headers and close controls remain accessible while the body scrolls. The Field adds bounded content snippets without changing coordinates or picking. Categories and Timeline browse loaded facts with exact category filters and explicit Stored/Last updated UTC dates. Unknown dates remain visible.
 
 ## Verification
+981 responsive checks, 107 legacy GUI checks, 194 transport checks, 27 offline backend checks, 15 Explorer model/controller checks, seven Zig tests, and 14 Rust tests passed. Clippy and formatting passed. Native WebKit/Openbox checks passed 9/9 for both the release binary and exact DEB payload using isolated synthetic fixtures.
 
-| Check | Result |
-|---|---|
-| Synthetic database edge cases | 27 passed |
-| Stock/wrapper equivalence and journal coverage | p1 passed |
-| Control, undo, passthrough, socket/auth checks | p2 passed |
-| Boot warm-up | Passed |
-| Native Rust tests | 14 passed; Clippy and format passed |
-| Full browser edge suite | 107 passed |
-| Direct transport regressions | 194 passed |
-| Zig unit tests | 7 passed; browser differential and fallback passed |
-| Field/Stream parity and bounds | 10 checks passed |
-| Installed native shell | Rendered real interface on private Xvfb; Zig mode observed |
-| Live databases | Both read-only quick checks returned `ok` |
-| Served artifacts | Hashes equal the verified frontend build |
+The installed executable matches the tested DEB. All served frontend hashes match candidate 5. Provider files outside the frontend match the protected baseline.
 
-The final synthetic journal-burst measurement was 468.9 ms → 27.5 ms.
-Field pixels and hit selections matched across benchmark pairs.
-The isolated optimized-JavaScript versus Zig comparison was about 3× at 3,000 facts.
-Native WebKitGTK timing was not benchmarked. The installed UI was functionally checked there.
+The longer component benchmark preserved exact pixels and hits. Warmed median draw time was 4.7ms baseline versus 4.6ms candidate; p95 was 5.7 versus 6.1ms. This is synchronous canvas-command timing with labels off, not native frame presentation. Label layout at 20,000 facts can exceed the 8ms target, especially cold. See [validation](docs/dev/next-ui-pass/VALIDATION.md) for both favorable and unfavorable observations.
 
-## Safety limits
+## Recovery
+The old frontend remains at `~/.hermes/.eye-frontend-stage-1.2-01a072ae` after the atomic exchange. Private recovery copies and installation receipts are in `/media/ben/Mass storage/agenticTinkering/claude/holographic-eye/2026-09-05-responsive-exploration/`.
 
-The process-local lock does not stop writers in other processes.
-Memory and journal are separate SQLite files and are not crash-atomic together.
-The recovery snapshots are individually consistent, not a guaranteed quiescent pair.
-Code rollback must not discard newer valid memory.
+Rollback only the shell/frontend if needed. Do not replace live databases or deploy the old 1.0.3 provider staging tree. The unchanged provider does not need a restart.
 
-## Source and recovery
+## Release authority
+Ben approved publication and entrusted routine release decisions to Prime unless he states otherwise. Recovery and verification remain required; repeated publication approval prompts are not.
 
-`PLAN.md` remains the source of truth. D-0016 covers UI, reliability, and performance.
-D-0017 covers the Zig kernel. The detailed contracts and release notes are in `docs/dev/2026-09-05/`.
-Private run coordination is kept locally and excluded from Git.
-
-Recovery artifacts are under:
-`/media/ben/Mass storage/agenticTinkering/claude/holographic-eye/2026-09-05-ui-update/`.
-The prior provider tree remains outside discovery for an atomic code rollback.
-Do not run mutation tests against live memory, restore over a live WAL database, or stop another session.
-
-## Release
-
-[Download v1.1.0](https://github.com/RamenFast/holographic-eye/releases/tag/v1.1.0).
-The source tag and package versions agree. Verify downloaded assets against SHA256SUMS.
-Provider deployment remains separate from the native package; preserve active conversations during upgrades.
+The completed v1.1.0 history remains available in the v1.1.0 tag. Its provider restart and database checks are historical, not actions performed in this pass.

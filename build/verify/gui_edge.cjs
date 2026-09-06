@@ -399,7 +399,7 @@ async function run() {
           `width=${railBox?.width ?? "missing"}px`);
         if (await rail.count()) await rail.click();
         check("fixtures", "empty Inspect manual opens on request",
-          /select a field point/i.test(await p.page.locator("#pane-inspect").innerText()));
+          /select (a field point|a fact in any view)/i.test(await p.page.locator("#pane-inspect").innerText()));
       }
       if (name === "singleton") {
         await selectFirstViaEntity(p.page);
@@ -797,8 +797,8 @@ async function run() {
 
     // Semantic tab roles and roving Arrow key focus.
     check("semantics", "left tabs expose tablist/tab/tabpanel roles",
-      await normal.page.locator('[role="tablist"] [role="tab"]').count() === 3 &&
-      await normal.page.locator('[role="tabpanel"]').count() === 1);
+      await normal.page.locator('#pane-left [role="tablist"] [role="tab"]').count() === 3 &&
+      await normal.page.locator('#pane-left [role="tabpanel"]').count() === 1);
     check("semantics", "header actions are labeled native buttons",
       await normal.page.locator('nav[aria-label="Application actions"] button.header-action').count() === 5 &&
       await normal.page.locator('nav[aria-label="Application actions"] button[aria-label], nav[aria-label="Application actions"] button[title]').count() === 5);

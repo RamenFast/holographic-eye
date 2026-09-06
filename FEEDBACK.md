@@ -30,3 +30,9 @@ Rules:
 - 2026-09-05 [ask] Improve performance using measured bottlenecks and before/after checks.
 - 2026-09-05 [ask] Rewrite code sections when this improves effectiveness while preserving memory behavior.
 - 2026-09-05 [ask] Use a programming language with style, such as Zig, Elixir, Odin, or pure C, for a meaningful part of the improvement.
+
+- 2026-09-05 [bugfix] Repair title bars on floating views; clarify whether internal dialogs, native window chrome, or both are affected.
+- 2026-09-05 [bugfix] Make the interface render correctly in narrow windows, not only large desktop widths.
+- 2026-09-05 [feature] Reveal fact text and content while zooming when the Field has enough free space.
+- 2026-09-05 [feature] Add useful category-based memory views.
+- 2026-09-05 [feature] Add useful timeline views with explicit date semantics.

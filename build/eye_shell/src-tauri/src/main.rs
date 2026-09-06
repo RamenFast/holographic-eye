@@ -51,7 +51,7 @@ fn launch_gui() -> Result<(), String> {
             let window = WebviewWindowBuilder::new(app, "main", start_url)
                 .title("The Holographic Eye")
                 .inner_size(1440.0, 900.0)
-                .min_inner_size(1100.0, 680.0)
+                .min_inner_size(640.0, 480.0)
                 .background_color(tauri::window::Color(0, 0, 0, 255))
                 .build()?;
             if !gateway_ready {
